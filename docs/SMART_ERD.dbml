@@ -1,0 +1,324 @@
+// Generated from server/prisma/schema.prisma
+// Paste this file into dbdiagram.io
+
+Enum Role {
+  TEACHER
+  ADMIN
+  REGISTRAR
+}
+Enum Quarter {
+  Q1
+  Q2
+  Q3
+  Q4
+}
+Enum GradeLevel {
+  GRADE_7
+  GRADE_8
+  GRADE_9
+  GRADE_10
+}
+Enum SubjectType {
+  CORE
+  MAPEH
+  TLE
+  MATH_SCIENCE
+}
+Enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+Enum EnrollmentStatus {
+  ENROLLED
+  PENDING
+  DROPPED
+  TRANSFERRED
+}
+Enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  CONFIG
+}
+Enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+Enum FormType {
+  SF1
+  SF2
+  SF3
+  SF4
+  SF5
+  SF6
+  SF8
+  SF9
+  SF10
+  SF7
+}
+
+Table User {
+  id varchar [pk]
+  username varchar [not null, unique]
+  password varchar [not null]
+  role Role [not null]
+  firstName varchar
+  lastName varchar
+  email varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+}
+Table Teacher {
+  id varchar [pk]
+  userId varchar [not null, unique]
+  employeeId varchar [not null, unique]
+  specialization varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+}
+Table Student {
+  id varchar [pk]
+  lrn varchar [not null, unique]
+  firstName varchar [not null]
+  middleName varchar
+  lastName varchar [not null]
+  suffix varchar
+  birthDate timestamp
+  gender varchar
+  address varchar
+  guardianName varchar
+  guardianContact varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+
+  indexes {
+    (lastName, firstName)
+  }
+}
+Table Section {
+  id varchar [pk]
+  name varchar [not null]
+  gradeLevel GradeLevel [not null]
+  schoolYear varchar [not null]
+  adviserId varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+
+  indexes {
+    (name, gradeLevel, schoolYear) [unique]
+    (gradeLevel, schoolYear)
+  }
+}
+Table Subject {
+  id varchar [pk]
+  code varchar [not null, unique]
+  name varchar [not null]
+  description varchar
+  type SubjectType
+  writtenWorkWeight int [default: 30]
+  perfTaskWeight int [default: 50]
+  quarterlyAssessWeight int [default: 20]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+}
+Table ClassAssignment {
+  id varchar [pk]
+  teacherId varchar [not null]
+  subjectId varchar [not null]
+  sectionId varchar [not null]
+  schoolYear varchar [not null]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+  ecrFileName varchar
+  ecrLastSyncedAt timestamp
+
+  indexes {
+    (teacherId, subjectId, sectionId, schoolYear) [unique]
+    (schoolYear)
+  }
+}
+Table Enrollment {
+  id varchar [pk]
+  studentId varchar [not null]
+  sectionId varchar [not null]
+  schoolYear varchar [not null]
+  status EnrollmentStatus
+  createdAt timestamp
+  updatedAt timestamp [not null]
+
+  indexes {
+    (studentId, sectionId, schoolYear) [unique]
+    (schoolYear, status)
+    (sectionId, schoolYear, status)
+    (studentId, schoolYear)
+  }
+}
+Table Grade {
+  id varchar [pk]
+  studentId varchar [not null]
+  classAssignmentId varchar [not null]
+  quarter Quarter [not null]
+  writtenWorkScores json
+  perfTaskScores json
+  quarterlyAssessScore float
+  quarterlyAssessMax float [default: 100]
+  writtenWorkPS float
+  perfTaskPS float
+  quarterlyAssessPS float
+  initialGrade float
+  quarterlyGrade float
+  remarks varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+
+  indexes {
+    (studentId, classAssignmentId, quarter) [unique]
+  }
+}
+Table Attendance {
+  id varchar [pk]
+  studentId varchar [not null]
+  sectionId varchar [not null]
+  date timestamp [not null]
+  status AttendanceStatus
+  remarks varchar
+  recordedBy varchar
+  createdAt timestamp
+  updatedAt timestamp [not null]
+
+  indexes {
+    (studentId, sectionId, date) [unique]
+    (sectionId, date)
+    (studentId)
+    (date)
+  }
+}
+Table AuditLog {
+  id varchar [pk]
+  action AuditAction [not null]
+  userId varchar
+  userName varchar [not null]
+  userRole varchar [not null]
+  target varchar [not null]
+  targetType varchar [not null]
+  targetId varchar
+  details varchar [not null]
+  ipAddress varchar
+  severity AuditSeverity
+  metadata json
+  createdAt timestamp
+
+  indexes {
+    (createdAt)
+    (userId)
+    (action)
+    (targetType)
+  }
+}
+Table SystemSettings {
+  id varchar [pk, default: "main"]
+  schoolName varchar [default: "Sample High School"]
+  schoolId varchar [default: "123456"]
+  division varchar [default: "Division of Sample City"]
+  region varchar [default: "Region IV-A CALABARZON"]
+  address varchar
+  contactNumber varchar
+  email varchar
+  currentSchoolYear varchar [default: "2025-2026"]
+  currentQuarter Quarter
+  logoUrl varchar
+  primaryColor varchar [default: "#6366f1"]
+  secondaryColor varchar [default: "#8b5cf6"]
+  accentColor varchar [default: "#06b6d4"]
+  sessionTimeout int [default: 30]
+  maxLoginAttempts int [default: 5]
+  passwordMinLength int [default: 8]
+  requireSpecialChar boolean [default: true]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+  autoAdvanceQuarter boolean [default: false]
+  lastEnrollProSync timestamp
+  q1EndDate timestamp
+  q1StartDate timestamp
+  q2EndDate timestamp
+  q2StartDate timestamp
+  q3EndDate timestamp
+  q3StartDate timestamp
+  q4EndDate timestamp
+  q4StartDate timestamp
+}
+Table GradingConfig {
+  id varchar [pk]
+  subjectType SubjectType [not null, unique]
+  writtenWorkWeight int [not null]
+  performanceTaskWeight int [not null]
+  quarterlyAssessWeight int [not null]
+  isDepEdDefault boolean [default: true]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+}
+Table ExcelTemplate {
+  id varchar [pk]
+  formType FormType [not null, unique]
+  formName varchar [not null]
+  description varchar
+  filePath varchar [not null]
+  fileName varchar [not null]
+  fileSize int [not null]
+  placeholders json
+  instructions varchar
+  isActive boolean [default: true]
+  uploadedBy varchar [not null]
+  uploadedByName varchar [not null]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+  sheetName varchar
+
+  indexes {
+    (formType)
+    (isActive)
+    (filePath)
+  }
+}
+Table ECRTemplate {
+  id varchar [pk]
+  subjectName varchar [not null]
+  description varchar
+  filePath varchar [not null]
+  fileName varchar [not null]
+  fileSize int [not null]
+  placeholders json
+  instructions varchar
+  isActive boolean [default: true]
+  uploadedBy varchar [not null]
+  uploadedByName varchar [not null]
+  createdAt timestamp
+  updatedAt timestamp [not null]
+  subjectType SubjectType
+
+  indexes {
+    (subjectName)
+    (isActive)
+    (filePath)
+  }
+}
+
+Ref: Teacher.userId - User.id
+Ref: Section.adviserId > Teacher.id
+Ref: ClassAssignment.sectionId > Section.id
+Ref: ClassAssignment.subjectId > Subject.id
+Ref: ClassAssignment.teacherId > Teacher.id
+Ref: Enrollment.sectionId > Section.id
+Ref: Enrollment.studentId > Student.id
+Ref: Grade.classAssignmentId > ClassAssignment.id
+Ref: Grade.studentId > Student.id
+Ref: Attendance.sectionId > Section.id
+Ref: Attendance.studentId > Student.id
+Ref: AuditLog.userId > User.id
+Ref: ExcelTemplate.uploadedBy > User.id
+Ref: ECRTemplate.uploadedBy > User.id

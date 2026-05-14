@@ -271,11 +271,14 @@ router.get(
       });
 
       const effectiveWeights = await resolveEffectiveWeightsForClassAssignment(classAssignmentId);
+      const systemSettings = await prisma.systemSettings.findUnique({ where: { id: 'main' } });
+      const currentQuarter = systemSettings?.currentQuarter ?? 'Q1';
 
       res.json({
         classAssignment,
         classRecord,
         effectiveWeights,
+        currentQuarter,
       });
     } catch (error) {
       console.error("Error fetching class record:", error);
@@ -517,6 +520,7 @@ router.get(
 
       const systemSettings = await prisma.systemSettings.findUnique({ where: { id: 'main' } });
       const currentSchoolYear = systemSettings?.currentSchoolYear ?? '2026-2027';
+      const currentQuarter = systemSettings?.currentQuarter ?? 'Q1';
 
       const classAssignments = await prisma.classAssignment.findMany({
         where: {
@@ -584,6 +588,7 @@ router.get(
           subjects: [...new Set(classAssignments.map((ca: ClassAssignmentWithRelations) => ca.subject.name))],
         },
         classAssignments,
+        currentQuarter,
       });
     } catch (error) {
       console.error("Error fetching dashboard:", error);
@@ -610,6 +615,7 @@ router.get(
 
       const sysSettings = await prisma.systemSettings.findUnique({ where: { id: 'main' } });
       const currentSY = sysSettings?.currentSchoolYear ?? '2026-2027';
+      const currentQuarter = sysSettings?.currentQuarter ?? 'Q1';
 
       const classAssignments = await prisma.classAssignment.findMany({
         where: {
@@ -629,7 +635,7 @@ router.get(
             },
           },
           grades: {
-            where: { quarter: "Q1" },
+            where: { quarter: currentQuarter },
           },
         },
       });
@@ -871,6 +877,9 @@ router.get(
         return;
       }
 
+      const sysSettings = await prisma.systemSettings.findUnique({ where: { id: 'main' } });
+      const currentQuarter = sysSettings?.currentQuarter ?? 'Q1';
+
       // Build filter for class assignments
       const classAssignmentFilter: any = {
         teacherId: teacher.id,
@@ -885,7 +894,7 @@ router.get(
         include: {
           section: true,
           grades: {
-            where: { quarter: "Q1" },
+            where: { quarter: currentQuarter },
           },
         },
       });

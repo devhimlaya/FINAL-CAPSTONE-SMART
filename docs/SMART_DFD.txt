@@ -1,0 +1,334 @@
+================================================================================
+   SMART SYSTEM - DATA FLOW DIAGRAM (DFD)
+   School Management and Academic Records Technology
+   Capstone Documentation Reference
+   Date: May 2026
+================================================================================
+
+--------------------------------------------------------------------------------
+SECTION 1: WHAT IS A DFD?
+--------------------------------------------------------------------------------
+
+A Data Flow Diagram (DFD) shows HOW DATA MOVES through a system.
+
+It answers 4 questions:
+  1. Who gives data to the system?  -> External Entities
+  2. What does the system do with it? -> Processes
+  3. Where is data saved?           -> Data Stores
+  4. Who receives data?             -> External Entities
+
+DFD LEVELS:
+  Level 0 = Context Diagram (entire system = 1 big circle)
+  Level 1 = Main processes broken out
+  Level 2 = Each process broken into sub-steps
+
+DFD SYMBOLS (TEXT VERSION):
+  [ Name ]   = External Entity (person, org, or outside system)
+  ( Name )   = Process (something SMART does to data)
+  === D1 ===  = Data Store (a database table)
+  ----->      = Data Flow (what data moves and in what direction)
+
+--------------------------------------------------------------------------------
+SECTION 2: SYSTEM OVERVIEW
+--------------------------------------------------------------------------------
+
+SMART is a web-based school management system for Junior High School.
+
+It connects to 2 external systems (READ-ONLY):
+  - ATLAS     : provides teacher-subject-section assignments
+  - EnrollPro : provides students, sections, advisory data
+
+It has 3 user roles:
+  - Admin     : manages users, settings, syncs
+  - Teacher   : records grades and attendance
+  - Registrar : uploads templates, generates school forms
+
+SMART writes ONLY to its own local database (smart_db, PostgreSQL).
+
+--------------------------------------------------------------------------------
+SECTION 3: LEVEL 0 - CONTEXT DIAGRAM
+--------------------------------------------------------------------------------
+
+                    [ATLAS]
+                (External System)
+                     |
+              Teaching Load Data
+              (auto-sync every 30 min)
+                     |
+                     v
+
+[ADMIN]  --(commands/settings)-->  +-----------------------------+
+[ADMIN]  <--(reports/audit logs)--  |                             |
+                                    |                             |
+[TEACHER] --(grades/attendance)-->  |          S M A R T         |
+[TEACHER] <--(class records)------  |                             |
+                                    |  School Management and      |
+[REGISTRAR] --(templates/requests)->|  Academic Records Tech      |
+[REGISTRAR] <--(school forms)-----  |                             |
+                                    +-----------------------------+
+                                                 |
+                                    Student/Enrollment Data
+                                    (auto-sync every 30 min)
+                                                 |
+                                                 v
+                                    [EnrollPro]
+                                (External Enrollment System)
+
+
+SUMMARY OF WHO TALKS TO SMART:
++------------+-------------------------------------------------------------+
+| ENTITY     | SENDS TO SMART              | RECEIVES FROM SMART          |
++------------+-----------------------------+------------------------------+
+| ATLAS      | Teaching load assignments   | Nothing (read-only)          |
+| EnrollPro  | Students, Sections,         | Nothing (read-only)          |
+|            | Enrollments, Advisers        |                              |
+| Admin      | Login, user commands,        | Reports, audit logs,         |
+|            | settings, sync triggers      | user lists, sync status      |
+| Teacher    | Login, grades, attendance    | Class lists, grade results,  |
+|            |                              | generated reports            |
+| Registrar  | Login, template uploads,     | School Forms (SF1-SF10)      |
+|            | report requests              | student reports              |
++------------+-----------------------------+------------------------------+
+
+--------------------------------------------------------------------------------
+SECTION 4: LEVEL 1 - MAIN PROCESSES
+--------------------------------------------------------------------------------
+
+The 7 main processes of SMART:
+
+PROCESS 1.0 - AUTHENTICATION
+  [Admin/Teacher/Registrar]
+      |-- username + password -->  (1.0 Authentication)
+                                       |-- check --> === D1: Users ===
+                                       |-- write --> === D10: AuditLog ===
+      <-- JWT Token (session) --------
+
+PROCESS 2.0 - DATA SYNCHRONIZATION
+  [ATLAS]
+      |-- faculty assignments -->  (2.1 Sync Teaching Loads)
+                                       |--> === D2: Teachers ===
+                                       |--> === D5: Subjects ===
+                                       |--> === D4: Sections ===
+                                       |--> === D6: ClassAssignments ===
+
+  [EnrollPro]
+      |-- students + sections -->  (2.2 Sync Enrollment Data)
+      |-- enrollments          -->     |--> === D3: Students ===
+      |-- adviser mapping      -->     |--> === D4: Sections ===
+                                       |--> === D7: Enrollments ===
+
+  [Admin]
+      |-- manual trigger -->       (2.3 Record Sync Status)
+      <-- sync status ---               |--> === D10: AuditLog ===
+
+PROCESS 3.0 - GRADE MANAGEMENT
+  [Teacher]
+      |-- written work scores     -->  (3.1 Record Scores)
+      |-- performance task scores -->      |--> === D8: Grades ===
+      |-- quarterly assessment    -->
+
+                                       (3.2 Compute Quarterly Grade)
+                                           |-- reads --> === D8: Grades ===
+                                           |-- reads --> === D12: GradingConfig ===
+      <-- computed quarterly grade ------
+
+                                       (3.3 Generate Class Record / ECR)
+                                           |-- reads --> === D8: Grades ===
+                                           |-- reads --> === D14: ECRTemplates ===
+      <-- Excel class record file -------
+
+PROCESS 4.0 - ATTENDANCE MANAGEMENT
+  [Teacher]
+      |-- student + date + status -->  (4.1 Record Attendance)
+                                           |--> === D9: Attendance ===
+      <-- attendance summary / SF2 ---  (4.2 Generate Attendance Reports)
+                                           |-- reads --> === D9: Attendance ===
+
+PROCESS 5.0 - TEMPLATE MANAGEMENT
+  [Registrar]
+      |-- SF1-SF10 Excel template -->  (5.1 Upload SF Template)
+                                           |--> === D13: ExcelTemplates ===
+
+  [Teacher]
+      |-- ECR Excel template -->       (5.2 Upload ECR Template)
+                                           |--> === D14: ECRTemplates ===
+
+PROCESS 6.0 - REPORT GENERATION
+  [Teacher / Registrar]
+      |-- form type + section -->  (6.1 Load Template)
+                                       |-- reads --> === D13: ExcelTemplates ===
+                                   (6.2 Populate Template with Real Data)
+                                       |-- reads --> === D3: Students ===
+                                       |-- reads --> === D4: Sections ===
+                                       |-- reads --> === D8: Grades ===
+                                       |-- reads --> === D9: Attendance ===
+                                       |-- reads --> === D11: SystemSettings ===
+                                   (6.3 Export Excel File)
+      <-- downloadable .xlsx file ---
+
+PROCESS 7.0 - SYSTEM ADMINISTRATION
+  [Admin]
+      |-- user commands -->        (7.1 User Management)
+      <-- user list ----               |--> === D1: Users ===
+                                       |--> === D2: Teachers ===
+
+      |-- update settings -->      (7.2 School Settings)
+                                       |--> === D11: SystemSettings ===
+                                       |--> === D12: GradingConfig ===
+
+      <-- audit log entries ---    (7.3 Audit Monitoring)
+                                       |-- reads --> === D10: AuditLog ===
+
+      |-- trigger sync -->         (7.4 Integration Control)
+      <-- sync result ---
+
+--------------------------------------------------------------------------------
+SECTION 5: DATA STORES (DATABASE TABLES)
+--------------------------------------------------------------------------------
+
+All data stores belong to SMART's local PostgreSQL database (smart_db).
+
++------+----------------------+-----------+--------------------------------------------+
+| ID   | Data Store Name      | Table     | What It Stores                             |
++------+----------------------+-----------+--------------------------------------------+
+| D1   | Users                | User      | Login credentials + role (Admin/Teacher/   |
+|      |                      |           | Registrar), names, email                   |
++------+----------------------+-----------+--------------------------------------------+
+| D2   | Teachers             | Teacher   | Teacher profile, employee ID, linked user  |
++------+----------------------+-----------+--------------------------------------------+
+| D3   | Students             | Student   | LRN, full name, gender, birth date,        |
+|      |                      |           | guardian info                              |
++------+----------------------+-----------+--------------------------------------------+
+| D4   | Sections             | Section   | Section name, grade level (7-10), school   |
+|      |                      |           | year, adviser (teacher)                    |
++------+----------------------+-----------+--------------------------------------------+
+| D5   | Subjects             | Subject   | Subject code, name, type, grading weights  |
++------+----------------------+-----------+--------------------------------------------+
+| D6   | Class Assignments    | ClassAss- | Which teacher handles which subject in     |
+|      |                      | ignment   | which section, per school year             |
++------+----------------------+-----------+--------------------------------------------+
+| D7   | Enrollments          | Enrollment| Student enrolled in a section per school yr|
++------+----------------------+-----------+--------------------------------------------+
+| D8   | Grades               | Grade     | Per-student quarterly scores (Written Work,|
+|      |                      |           | Perf Task, Quarterly Assessment, Final)    |
++------+----------------------+-----------+--------------------------------------------+
+| D9   | Attendance           | Attendance| Daily attendance per student per section   |
+|      |                      |           | (Present/Absent/Late/Excused)              |
++------+----------------------+-----------+--------------------------------------------+
+| D10  | Audit Log            | AuditLog  | All actions logged: who, what, when,       |
+|      |                      |           | severity (INFO/WARNING/CRITICAL)           |
++------+----------------------+-----------+--------------------------------------------+
+| D11  | System Settings      | SystemSet-| School name, current school year/quarter,  |
+|      |                      | tings     | colors, session timeout, password rules    |
++------+----------------------+-----------+--------------------------------------------+
+| D12  | Grading Config       | Grading-  | DepEd grading weights per subject type     |
+|      |                      | Config    | (CORE/MAPEH/TLE/MATH_SCIENCE)              |
++------+----------------------+-----------+--------------------------------------------+
+| D13  | Excel Templates      | ExcelTemp-| Uploaded SF1-SF10 Excel templates          |
+|      |                      | late      | with detected placeholders                 |
++------+----------------------+-----------+--------------------------------------------+
+| D14  | ECR Templates        | ECRTemp-  | Uploaded Electronic Class Record templates |
+|      |                      | late      | per subject type                           |
++------+----------------------+-----------+--------------------------------------------+
+
+--------------------------------------------------------------------------------
+SECTION 6: DEPED GRADING FORMULA (for Grade Management DFD)
+--------------------------------------------------------------------------------
+
+Quarterly Grade = (Written Work % x WW_PS) + (Perf Task % x PT_PS) + (QA % x QA_PS)
+
+Default weights (configurable per subject type):
+  - Written Work       : 30%
+  - Performance Task   : 50%
+  - Quarterly Assessment: 20%
+  Total                : 100%
+
+Subject types with potentially different weights:
+  - CORE        (English, Filipino, Science, etc.)
+  - MATH_SCIENCE
+  - MAPEH       (Music, Arts, Physical Ed, Health)
+  - TLE         (Technology and Livelihood Ed)
+
+--------------------------------------------------------------------------------
+SECTION 7: SCHOOL FORMS GENERATED
+--------------------------------------------------------------------------------
+
+SMART can generate the following DepEd School Forms (SF1-SF10):
+
+  SF1  - School Register (list of enrolled students)
+  SF2  - Daily Attendance Register
+  SF3  - Book of Accounts (class grades)
+  SF4  - Monthly Attendance Report
+  SF5  - Report on Promotion
+  SF6  - Summarized Report on Promotion and Level of Proficiency
+  SF7  - Homeroom Guidance Monitoring Sheet
+  SF8  - Summary of Learner's Time on Task
+  SF9  - Report Card
+  SF10 - Permanent Record (Form 137)
+
+Template-based approach:
+  1. Admin/Registrar uploads Excel (.xlsx) template for each form
+  2. Template contains {{PLACEHOLDER}} tags
+  3. SMART replaces placeholders with real data at export time
+  4. Result is a filled-in, ready-to-print Excel file
+
+--------------------------------------------------------------------------------
+SECTION 8: EXTERNAL INTEGRATIONS
+--------------------------------------------------------------------------------
+
+ATLAS:
+  Base URL   : http://100.88.55.125:5001/api/v1
+  School ID  : 1
+  Sync Data  : Faculty assignments (teacher -> subject -> section)
+  Direction  : ATLAS --READ ONLY--> SMART
+  Frequency  : Every 30 minutes (auto) + manual trigger
+
+EnrollPro:
+  Base URL   : https://dev-jegs.buru-degree.ts.net/api
+  School ID  : 5 (EnrollPro) / 1 (ATLAS internal mapping)
+  Sync Data  : Students, Sections, Enrollments, Advisory assignments
+  Direction  : EnrollPro --READ ONLY--> SMART
+  Frequency  : Every 30 minutes (auto) + manual trigger
+
+IMPORTANT RULE: SMART never writes/posts/patches back to ATLAS or EnrollPro.
+
+--------------------------------------------------------------------------------
+SECTION 9: TECHNOLOGY STACK
+--------------------------------------------------------------------------------
+
+  Frontend : React 18 + TypeScript + Vite + Tailwind CSS
+  Backend  : Node.js + Express + TypeScript
+  Database : PostgreSQL (via Prisma ORM)
+  Auth     : JWT Bearer Tokens (role-based)
+  Excel    : xlsx-populate (template injection)
+  Network  : Tailscale VPN (for external system access)
+  Server   : Port 5004
+
+--------------------------------------------------------------------------------
+SECTION 10: ROLE PERMISSIONS SUMMARY
+--------------------------------------------------------------------------------
+
+  ADMIN:
+    - Create / update / disable user accounts
+    - Configure school settings (school year, quarter, grading weights)
+    - View audit logs
+    - Trigger ATLAS and EnrollPro sync manually
+    - Upload ECR and SF templates (via admin panel)
+
+  TEACHER:
+    - View their assigned class sections and subjects
+    - Enter and edit student grades (per quarter, per subject)
+    - Take and view attendance records
+    - Download their class record (ECR) as Excel
+    - View advisory class info
+
+  REGISTRAR:
+    - Upload DepEd School Form templates (SF1-SF10)
+    - Generate any school form for any section/school year
+    - View all student and section data
+    - Export attendance and grade reports
+
+================================================================================
+END OF DOCUMENT
+SMART DFD Reference | Capstone Project Documentation
+================================================================================
