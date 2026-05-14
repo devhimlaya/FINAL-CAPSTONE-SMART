@@ -1,0 +1,386 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Eye, EyeOff, LogIn, User, Lock, AlertCircle, CheckCircle, GraduationCap, FileText, UserCheck, FolderOpen, ClipboardCheck, MapPin, Building2, Globe } from "lucide-react";
+import axios from "axios";
+import { useTheme } from "@/contexts/ThemeContext";
+import { SERVER_URL } from "@/lib/api";
+import { getAcronym } from "@/lib/utils";
+
+const API_URL = "/api";
+
+interface LoginResponse {
+  message: string;
+  token: string;
+  user: {
+    id: string;
+    username: string;
+    role: "TEACHER" | "ADMIN" | "REGISTRAR";
+  };
+}
+
+export default function RegistrarLoginPage() {
+  const navigate = useNavigate();
+  const { colors, logoUrl, schoolName, schoolAddress, schoolDivision, schoolRegion } = useTheme();
+  const acronym = getAcronym(schoolName);
+  const fullLogoUrl = logoUrl ? (logoUrl.startsWith("http") ? logoUrl : `${SERVER_URL}${logoUrl}`) : null;
+  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<LoginResponse | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await axios.post<LoginResponse>(`${API_URL}/auth/login`, {
+        email,
+        password,
+      });
+
+      // Verify registrar role
+      if (response.data.user.role !== "REGISTRAR") {
+        setError("Access denied. This portal is for registrars only.");
+        setIsLoading(false);
+        return;
+      }
+
+      sessionStorage.setItem("token", response.data.token);
+      sessionStorage.setItem("user", JSON.stringify(response.data.user));
+
+      setSuccess(response.data);
+
+      setTimeout(() => {
+        navigate("/registrar");
+      }, 1000);
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response) {
+        setError(err.response.data.message || "Login failed");
+      } else {
+        setError("Unable to connect to server. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="h-screen w-full flex overflow-hidden" style={{ background: `linear-gradient(to bottom right, #f8fafc, ${colors.primary}08, ${colors.accent}06)` }}>
+      {/* Left Panel - Registrar Branding */}
+      <div className="hidden lg:flex lg:w-[55%] xl:w-3/5 relative overflow-hidden">
+        {/* Animated gradient background */}
+        <div className="absolute inset-0 animate-gradient" style={{ background: `linear-gradient(to bottom right, ${colors.primary}, ${colors.secondary}, ${colors.accent})`, backgroundSize: '200% 200%' }} />
+        
+        {/* Decorative patterns */}
+        <div className="absolute inset-0">
+          {/* Floating orbs */}
+          <div className="absolute top-20 left-20 w-96 h-96 rounded-full bg-white/10 blur-3xl animate-float" />
+          <div className="absolute bottom-32 right-16 w-80 h-80 rounded-full blur-3xl animate-float" style={{ backgroundColor: `${colors.accent}33`, animationDelay: '2s' }} />
+          <div className="absolute top-1/2 left-1/4 w-64 h-64 rounded-full blur-2xl animate-float" style={{ backgroundColor: `${colors.primary}25`, animationDelay: '4s' }} />
+          
+          {/* Grid overlay */}
+          <div className="absolute inset-0 opacity-[0.03]" style={{
+            backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+            backgroundSize: '50px 50px'
+          }} />
+        </div>
+
+        <div className="relative z-10 flex flex-col justify-center px-12 xl:px-20 text-white w-full">
+          {/* Logo + Registrar Badge */}
+          <div className="flex items-center gap-4 mb-12">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center shadow-2xl overflow-hidden flex-shrink-0" style={{ backgroundColor: fullLogoUrl ? 'white' : 'rgba(255,255,255,0.15)', border: '2px solid rgba(255,255,255,0.3)' }}>
+              {fullLogoUrl ? (
+                <img src={fullLogoUrl} alt={schoolName} className="w-full h-full object-cover" />
+              ) : (
+                <GraduationCap className="w-9 h-9 text-white" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-4xl font-bold tracking-tight">{acronym}</h1>
+                <span className="px-2 py-0.5 text-xs font-bold rounded-md" style={{ backgroundColor: `${colors.secondary}`, color: 'white' }}>REGISTRAR</span>
+              </div>
+              <p className="text-white/80 text-sm font-medium tracking-wide">Registrar's Portal</p>
+            </div>
+          </div>
+
+          {/* School Name + Details */}
+          <div className="space-y-3 mb-12">
+            <h2 className="text-3xl xl:text-4xl font-bold leading-tight tracking-tight">
+              {schoolName}
+            </h2>
+            <div className="flex flex-col gap-1.5 mt-3">
+              {schoolAddress && (
+                <div className="flex items-center gap-2 text-white/70 text-sm">
+                  <MapPin className="w-4 h-4 flex-shrink-0" />
+                  <span>{schoolAddress}</span>
+                </div>
+              )}
+              {schoolDivision && (
+                <div className="flex items-center gap-2 text-white/70 text-sm">
+                  <Building2 className="w-4 h-4 flex-shrink-0" />
+                  <span>Division of {schoolDivision}</span>
+                </div>
+              )}
+              {schoolRegion && (
+                <div className="flex items-center gap-2 text-white/70 text-sm">
+                  <Globe className="w-4 h-4 flex-shrink-0" />
+                  <span>{schoolRegion}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Registrar-specific Feature cards */}
+          <div className="grid gap-4">
+            {[
+              { icon: UserCheck, title: "Student Records", desc: "Manage enrollment and student data" },
+              { icon: FileText, title: "School Forms", desc: "Generate official documents" },
+              { icon: FolderOpen, title: "Document Management", desc: "Organize academic records" },
+              { icon: ClipboardCheck, title: "Enrollment Processing", desc: "Handle student registrations" }
+            ].map((feature, i) => (
+              <div 
+                key={i}
+                className="flex items-center gap-4 p-4 rounded-2xl bg-white/5 backdrop-blur-sm border border-white/10 transition-all duration-300 hover:bg-white/10 hover:border-white/20 group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <feature.icon className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white">{feature.title}</h3>
+                  <p className="text-white/60 text-sm">{feature.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer attribution */}
+        <div className="absolute bottom-8 left-12 xl:left-20 flex items-center gap-3 text-white/50 text-sm">
+          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+            <FileText className="w-4 h-4" />
+          </div>
+          <span>Registrar Office • Records Management</span>
+        </div>
+      </div>
+
+      {/* Right Panel - Login Form */}
+      <div className="w-full lg:w-[45%] xl:w-2/5 flex items-center justify-center p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <div className="w-full max-w-[420px]">
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center shadow-lg overflow-hidden" style={{ background: fullLogoUrl ? 'white' : `linear-gradient(to bottom right, ${colors.primary}, ${colors.secondary})`, boxShadow: `0 10px 15px -3px ${colors.primary}40` }}>
+              {fullLogoUrl ? (
+                <img src={fullLogoUrl} alt={schoolName} className="w-full h-full object-cover" />
+              ) : (
+                <GraduationCap className="w-7 h-7 text-white" />
+              )}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-bold text-gray-900">{acronym}</span>
+                <span className="px-2 py-0.5 text-xs font-bold rounded-md" style={{ backgroundColor: `${colors.secondary}`, color: 'white' }}>REGISTRAR</span>
+              </div>
+              <p className="text-xs text-gray-500">Registrar Portal</p>
+            </div>
+          </div>
+
+          {/* Login card with premium styling */}
+          <Card className="border-0 shadow-2xl shadow-gray-200/60 bg-white/90 backdrop-blur-xl rounded-3xl overflow-hidden">
+            <CardHeader className="space-y-1 text-center pt-5 pb-0 px-6">
+              <div className="w-14 h-14 mx-auto rounded-full flex items-center justify-center shadow-lg overflow-hidden" style={{ background: fullLogoUrl ? 'white' : `linear-gradient(to bottom right, ${colors.primary}, ${colors.secondary})`, boxShadow: `0 10px 15px -3px ${colors.primary}30`, border: fullLogoUrl ? `2px solid ${colors.primary}20` : 'none' }}>
+                {fullLogoUrl ? (
+                  <img src={fullLogoUrl} alt={schoolName} className="w-full h-full object-cover" />
+                ) : (
+                  <FileText className="w-6 h-6 text-white" />
+                )}
+              </div>
+              <CardTitle className="text-xl font-bold text-gray-900 pt-2">
+                Registrar Office
+              </CardTitle>
+              <CardDescription className="text-gray-600 text-sm">
+                Sign in to manage student records at <span className="font-semibold" style={{ color: colors.primary }}>{acronym}</span>
+              </CardDescription>
+            </CardHeader>
+            
+            <CardContent className="px-6 pb-5 pt-4">
+              {/* Error Message */}
+              {error && (
+                <div className="mb-4 p-3 rounded-xl bg-gradient-to-r from-red-50 to-rose-50 border border-red-100 flex items-center gap-2.5 animate-scale-in">
+                  <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
+                    <AlertCircle className="w-4 h-4 text-red-600" />
+                  </div>
+                  <span className="text-sm font-medium text-red-700">{error}</span>
+                </div>
+              )}
+
+              {/* Success Message */}
+              {success && (
+                <div className="mb-4 p-3 rounded-xl border flex items-center gap-2.5 animate-scale-in" style={{ background: `linear-gradient(to right, ${colors.primary}12, ${colors.secondary}12)`, borderColor: `${colors.primary}25` }}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${colors.primary}20` }}>
+                    <CheckCircle className="w-4 h-4" style={{ color: colors.primary }} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: colors.primary }}>Access granted!</p>
+                    <p className="text-xs" style={{ color: colors.secondary }}>Loading registrar tools...</p>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-3">
+                {/* Email Field */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="email" className="text-gray-800 font-semibold text-sm pl-1">
+                    Employee ID
+                  </Label>
+                  <div className="relative group">
+                    <div className="absolute left-0 top-0 bottom-0 w-11 flex items-center justify-center pointer-events-none z-10">
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 group-focus-within:bg-gray-200 flex items-center justify-center transition-colors duration-200">
+                        <User className="w-4 h-4 text-gray-500 transition-colors duration-200" />
+                      </div>
+                    </div>
+                    <Input
+                      id="email"
+                      type="text"
+                      placeholder="Enter your Employee ID"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="pl-12 h-11 bg-gray-50/80 border-gray-200 hover:border-gray-300 focus:ring-4 rounded-xl transition-all duration-200 placeholder:text-gray-400 text-gray-900 font-medium"
+                      style={{ '--tw-ring-color': `${colors.primary}18` } as React.CSSProperties}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = colors.primary; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = ''; }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="password" className="text-gray-800 font-semibold text-sm pl-1">
+                    Password
+                  </Label>
+                  <div className="relative group">
+                    <div className="absolute left-0 top-0 bottom-0 w-11 flex items-center justify-center pointer-events-none z-10">
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 group-focus-within:bg-gray-200 flex items-center justify-center transition-colors duration-200">
+                        <Lock className="w-4 h-4 text-gray-500 transition-colors duration-200" />
+                      </div>
+                    </div>
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-12 pr-11 h-11 bg-gray-50/80 border-gray-200 hover:border-gray-300 focus:ring-4 rounded-xl transition-all duration-200 placeholder:text-gray-400 text-gray-900 font-medium"
+                      style={{ '--tw-ring-color': `${colors.primary}18` } as React.CSSProperties}
+                      onFocus={(e) => { e.currentTarget.style.borderColor = colors.primary; }}
+                      onBlur={(e) => { e.currentTarget.style.borderColor = ''; }}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-all duration-200"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Remember Me & Forgot Password */}
+                <div className="flex items-center justify-between text-sm">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="peer sr-only"
+                      />
+                      <div className="w-4 h-4 rounded border-2 border-gray-300 peer-checked:border-transparent transition-all duration-200 flex items-center justify-center" style={{ ...(false ? { borderColor: colors.primary, backgroundColor: colors.primary } : {}) }}>
+                        <svg className="w-2.5 h-2.5 text-white opacity-0 peer-checked:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    </div>
+                    <span className="text-gray-600 group-hover:text-gray-900 transition-colors font-medium text-sm">Remember me</span>
+                  </label>
+                  <a href="#" className="font-semibold transition-colors hover:underline underline-offset-4 decoration-2 text-sm" style={{ color: colors.primary }}>
+                    Forgot password?
+                  </a>
+                </div>
+
+                {/* Login Button */}
+                <Button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full h-11 text-white font-semibold text-sm rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed"
+                  style={{ background: `linear-gradient(to right, ${colors.primary}, ${colors.secondary})`, boxShadow: `0 10px 15px -3px ${colors.primary}35` }}
+                >
+                  {isLoading ? (
+                    <span className="flex items-center gap-3">
+                      <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Signing in...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-3">
+                      <LogIn className="w-5 h-5" />
+                      Sign In
+                    </span>
+                  )}
+                </Button>
+              </form>
+
+              {/* Demo credentials - Registrar only */}
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <FileText className="w-3.5 h-3.5" style={{ color: colors.primary }} />
+                  <p className="text-xs font-semibold text-gray-600">Quick Demo Access</p>
+                </div>
+                <div className="flex justify-center">
+                  <button 
+                    type="button"
+                    className="text-center py-2 px-4 rounded-lg border hover:scale-105 transition-transform cursor-pointer"
+                    style={{ backgroundColor: `${colors.primary}12`, borderColor: `${colors.primary}20` }}
+                    onClick={() => { setEmail('1000002'); setPassword('Registrar2026!'); }}
+                  >
+                    <p className="font-bold text-sm" style={{ color: colors.primary }}>Demo Registrar</p>
+                    <p className="text-gray-500 text-xs mt-0.5 font-mono">1000002 / Registrar2026!</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Other portals link */}
+              <div className="mt-4 text-center">
+                <p className="text-xs text-gray-500 mb-2">Not a registrar?</p>
+                <div className="flex gap-2 justify-center">
+                  <a href="/login/admin" className="text-xs font-semibold hover:underline" style={{ color: colors.primary }}>Admin Portal</a>
+                  <span className="text-gray-300">•</span>
+                  <a href="/login" className="text-xs font-semibold hover:underline" style={{ color: colors.primary }}>Teacher Portal</a>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <p className="text-[10px] text-gray-400 text-center mt-4 leading-relaxed">
+                By signing in, you agree to our{' '}
+                <a href="#" className="hover:underline" style={{ color: colors.primary }}>Terms</a>
+                {' '}and{' '}
+                <a href="#" className="hover:underline" style={{ color: colors.primary }}>Privacy Policy</a>
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}

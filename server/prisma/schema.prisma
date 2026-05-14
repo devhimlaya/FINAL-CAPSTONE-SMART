@@ -1,0 +1,398 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                   String          @id @default(cuid())
+  username             String          @unique
+  password             String
+  role                 Role
+  firstName            String?
+  lastName             String?
+  email                String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  auditLogs            AuditLog[]      @relation("AuditLogUser")
+  uploadedEcrTemplates ECRTemplate[]   @relation("ECRTemplateUploader")
+  uploadedExcelForms   ExcelTemplate[] @relation("ExcelTemplateUploader")
+  teacher              Teacher?
+}
+
+model Teacher {
+  id               String            @id @default(cuid())
+  userId           String            @unique
+  employeeId       String            @unique
+  specialization   String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  classAssignments ClassAssignment[]
+  workloadEntries  WorkloadEntry[]
+  advisorySections Section[]         @relation("SectionAdviser")
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Student {
+  id              String       @id @default(cuid())
+  lrn             String       @unique
+  firstName       String
+  middleName      String?
+  lastName        String
+  suffix          String?
+  birthDate       DateTime?
+  gender          String?
+  address         String?
+  guardianName    String?
+  guardianContact String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  attendance      Attendance[]
+  enrollments     Enrollment[]
+  grades          Grade[]
+
+  @@index([lastName, firstName])
+}
+
+model Section {
+  id               String            @id @default(cuid())
+  name             String
+  gradeLevel       GradeLevel
+  schoolYear       String
+  adviserId        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  attendance       Attendance[]
+  classAssignments ClassAssignment[]
+  workloadEntries  WorkloadEntry[]
+  enrollments      Enrollment[]
+  adviser          Teacher?          @relation("SectionAdviser", fields: [adviserId], references: [id])
+
+  @@unique([name, gradeLevel, schoolYear])
+  @@index([gradeLevel, schoolYear])
+}
+
+model Subject {
+  id                    String            @id @default(cuid())
+  code                  String            @unique
+  name                  String
+  description           String?
+  type                  SubjectType       @default(CORE)
+  writtenWorkWeight     Int               @default(30)
+  perfTaskWeight        Int               @default(50)
+  quarterlyAssessWeight Int               @default(20)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  classAssignments      ClassAssignment[]
+}
+
+model ClassAssignment {
+  id              String    @id @default(cuid())
+  teacherId       String
+  subjectId       String
+  sectionId       String
+  schoolYear      String
+  teachingMinutes Int?
+  isActive        Boolean   @default(true)
+  archivedAt      DateTime?
+  archivedReason  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  ecrFileName     String?
+  ecrLastSyncedAt DateTime?
+  section         Section   @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  subject         Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher         Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  grades          Grade[]
+  workloadEntries WorkloadEntry[]
+
+  @@unique([teacherId, subjectId, sectionId, schoolYear])
+  @@index([schoolYear])
+}
+
+model Enrollment {
+  id         String           @id @default(cuid())
+  studentId  String
+  sectionId  String
+  schoolYear String
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  status     EnrollmentStatus @default(ENROLLED)
+  section    Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  student    Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sectionId, schoolYear])
+  @@index([schoolYear, status])
+  @@index([sectionId, schoolYear, status])
+  @@index([studentId, schoolYear])
+}
+
+model Grade {
+  id                   String          @id @default(cuid())
+  studentId            String
+  classAssignmentId    String
+  quarter              Quarter
+  writtenWorkScores    Json?
+  perfTaskScores       Json?
+  quarterlyAssessScore Float?
+  quarterlyAssessMax   Float?          @default(100)
+  qaDescription        String?
+  qaDate               String?
+  writtenWorkPS        Float?
+  perfTaskPS           Float?
+  quarterlyAssessPS    Float?
+  initialGrade         Float?
+  quarterlyGrade       Float?
+  remarks              String?
+  qualitativeDescriptor String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  classAssignment      ClassAssignment @relation(fields: [classAssignmentId], references: [id], onDelete: Cascade)
+  student              Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, classAssignmentId, quarter])
+}
+
+model GradeSnapshot {
+  id                 String   @id @default(cuid())
+  gradeId            String?
+  studentId          String
+  classAssignmentId  String
+  teacherId          String
+  subjectCode        String
+  subjectName        String
+  sectionId          String
+  sectionName        String
+  schoolYear         String
+  quarter            Quarter
+  snapshot           Json
+  createdAt          DateTime @default(now())
+
+  @@index([studentId, classAssignmentId, quarter])
+  @@index([classAssignmentId, quarter])
+  @@index([teacherId, createdAt])
+}
+
+model Attendance {
+  id         String           @id @default(cuid())
+  studentId  String
+  sectionId  String
+  date       DateTime         @db.Date
+  status     AttendanceStatus @default(PRESENT)
+  remarks    String?
+  recordedBy String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  section    Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  student    Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sectionId, date])
+  @@index([sectionId, date])
+  @@index([studentId])
+  @@index([date])
+}
+
+model WorkloadEntry {
+  id               String         @id @default(cuid())
+  teacherId        String
+  sectionId        String?
+  classAssignmentId String?
+  schoolYear       String
+  type             WorkloadType
+  minutes          Int
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  teacher          Teacher        @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  section          Section?       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  classAssignment  ClassAssignment? @relation(fields: [classAssignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, sectionId, schoolYear, type])
+  @@index([teacherId, schoolYear])
+  @@index([type, schoolYear])
+}
+
+model AuditLog {
+  id         String        @id @default(cuid())
+  action     AuditAction
+  userId     String?
+  userName   String
+  userRole   String
+  target     String
+  targetType String
+  targetId   String?
+  details    String
+  ipAddress  String?
+  severity   AuditSeverity @default(INFO)
+  metadata   Json?
+  createdAt  DateTime      @default(now())
+  user       User?         @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([action])
+  @@index([targetType])
+}
+
+model SystemSettings {
+  id                 String    @id @default("main")
+  schoolName         String    @default("Sample High School")
+  schoolId           String    @default("123456")
+  division           String    @default("Division of Sample City")
+  region             String    @default("Region IV-A CALABARZON")
+  address            String?
+  contactNumber      String?
+  email              String?
+  currentSchoolYear  String    @default("2025-2026")
+  currentQuarter     Quarter   @default(Q1)
+  logoUrl            String?
+  primaryColor       String    @default("#6366f1")
+  secondaryColor     String    @default("#8b5cf6")
+  accentColor        String    @default("#06b6d4")
+  sessionTimeout     Int       @default(30)
+  maxLoginAttempts   Int       @default(5)
+  passwordMinLength  Int       @default(8)
+  requireSpecialChar Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  autoAdvanceQuarter Boolean   @default(false)
+  q1EndDate          DateTime?
+  q1StartDate        DateTime?
+  q2EndDate          DateTime?
+  q2StartDate        DateTime?
+  q3EndDate          DateTime?
+  q3StartDate        DateTime?
+  q4EndDate          DateTime?
+  q4StartDate        DateTime?
+  lastEnrollProSync  DateTime?
+}
+
+model GradingConfig {
+  id                    String      @id @default(cuid())
+  subjectType           SubjectType @unique
+  writtenWorkWeight     Int
+  performanceTaskWeight Int
+  quarterlyAssessWeight Int
+  isDepEdDefault        Boolean     @default(true)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+}
+
+model ExcelTemplate {
+  id             String   @id @default(cuid())
+  formType       FormType @unique
+  formName       String
+  description    String?
+  filePath       String
+  fileName       String
+  fileSize       Int
+  placeholders   Json?
+  instructions   String?
+  isActive       Boolean  @default(true)
+  uploadedBy     String
+  uploadedByName String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  sheetName      String?
+  uploader       User     @relation("ExcelTemplateUploader", fields: [uploadedBy], references: [id])
+
+  @@index([formType])
+  @@index([isActive])
+  @@index([filePath])
+}
+
+model ECRTemplate {
+  id             String       @id @default(cuid())
+  subjectName    String
+  description    String?
+  filePath       String
+  fileName       String
+  fileSize       Int
+  placeholders   Json?
+  instructions   String?
+  isActive       Boolean      @default(true)
+  uploadedBy     String
+  uploadedByName String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  subjectType    SubjectType?
+  uploader       User         @relation("ECRTemplateUploader", fields: [uploadedBy], references: [id])
+
+  @@index([subjectName])
+  @@index([isActive])
+  @@index([filePath])
+}
+
+enum Role {
+  TEACHER
+  ADMIN
+  REGISTRAR
+}
+
+enum Quarter {
+  Q1
+  Q2
+  Q3
+  Q4
+}
+
+enum GradeLevel {
+  GRADE_7
+  GRADE_8
+  GRADE_9
+  GRADE_10
+}
+
+enum SubjectType {
+  CORE
+  MAPEH
+  TLE
+  MATH_SCIENCE
+}
+
+enum WorkloadType {
+  ADVISORY_ROLE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  PENDING
+  DROPPED
+  TRANSFERRED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  CONFIG
+}
+
+enum AuditSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum FormType {
+  SF1
+  SF2
+  SF3
+  SF4
+  SF5
+  SF6
+  SF8
+  SF9
+  SF10
+  SF7
+}
