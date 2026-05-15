@@ -130,14 +130,18 @@ function transmuteGrade(initialGrade: number): number {
 interface LedgerRowProps {
   record: ClassRecord | null;
   idx: number;
+  rowIndex: number;
   isHps?: boolean;
+  hpsStickyTop?: number;
   hpsData?: { wwScores: ScoreItem[]; ptScores: ScoreItem[]; qaMax: number };
   selectedQuarter: string;
   wwCount: number;
   ptCount: number;
   weights: { ww: number; pt: number; qa: number };
-  onScoreUpdate: (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number, val: number) => void;
   onHpsUpdate: (cat: 'WW' | 'PT' | 'QA', idx: number, val: number) => void;
+  onScoreCommit: (inputEl: HTMLInputElement, sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => boolean;
+  onCellFocus: (cat: 'WW' | 'PT' | 'QA', idx: number) => void;
+  isCellInvalid: (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => boolean;
 }
 
 interface AssessmentTaskMeta {
@@ -146,7 +150,7 @@ interface AssessmentTaskMeta {
 }
 
 const LedgerRow = React.memo(({ 
-  record, idx, isHps = false, hpsData, selectedQuarter, wwCount, ptCount, weights, onScoreUpdate, onHpsUpdate 
+  record, idx, rowIndex, isHps = false, hpsStickyTop, hpsData, selectedQuarter, wwCount, ptCount, weights, onHpsUpdate, onScoreCommit, onCellFocus, isCellInvalid
 }: LedgerRowProps) => {
   const studentId = record?.student.id || "HPS";
   const grade = record?.grades?.find(g => g.quarter === selectedQuarter);
@@ -195,14 +199,29 @@ const LedgerRow = React.memo(({
     grade?.quarterlyGrade ??
     (displayInitialGrade !== null ? transmuteGrade(displayInitialGrade) : null);
 
-  const cellClass = "text-center text-[10px] font-bold border-r border-slate-100 p-0 h-9";
+  const cellClass = "text-center text-[10px] font-bold border-r border-slate-100 p-0 h-10";
   const inputClass = "w-full h-full bg-transparent text-center focus:bg-white focus:ring-1 focus:ring-inset focus:ring-indigo-500/30 outline-none transition-all px-1 font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
   return (
-    <TableRow className={`${isHps ? 'bg-slate-800 text-white border-y border-slate-700 sticky top-0 z-20 shadow-lg' : 'hover:bg-indigo-50/10'} transition-all border-b border-slate-100 group h-9`}>
-      <TableCell className={`text-center font-bold text-[9px] border-r border-slate-100 ${isHps ? 'text-indigo-300' : 'text-slate-300'}`}>{isHps ? "MAX" : idx + 1}</TableCell>
-      <TableCell className={`font-mono text-[9px] font-medium border-r border-slate-100 px-3 truncate ${isHps ? 'text-slate-500' : 'text-slate-400'}`}>{isHps ? "—" : record?.student.lrn}</TableCell>
-      <TableCell className="border-r border-slate-200 px-3 min-w-[200px]">
+    <TableRow
+      className={isHps ? 'bg-slate-800 text-white shadow-lg h-10 hover:bg-slate-800 transition-none' : 'hover:bg-indigo-50/10 transition-all group h-10'}
+    >
+      <TableCell
+        className={`text-center font-bold text-[9px] border-r border-b border-slate-100 ${isHps ? 'text-indigo-300 sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : 'text-slate-300'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
+        {isHps ? "MAX" : idx + 1}
+      </TableCell>
+      <TableCell
+        className={`font-mono text-[9px] font-medium border-r border-b border-slate-100 px-3 truncate ${isHps ? 'text-slate-500 sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : 'text-slate-400'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
+        {isHps ? "—" : record?.student.lrn}
+      </TableCell>
+      <TableCell
+        className={`border-r border-b border-slate-200 px-3 min-w-[200px] ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         <p className={`font-bold text-[10px] tracking-tight uppercase truncate ${isHps ? 'text-indigo-300' : 'text-slate-700'}`}>
           {isHps ? "HIGHEST POSSIBLE SCORE" : `${record?.student.lastName}, ${record?.student.firstName}`}
         </p>
@@ -210,85 +229,198 @@ const LedgerRow = React.memo(({
       
       {/* WW Individual */}
       {Array.from({ length: wwCount }).map((_, i) => (
-        <TableCell key={`ww-${i}`} className={cellClass}>
+        <TableCell
+          key={`ww-${i}`}
+          className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
+          style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+        >
+          {(() => {
+            const invalid = !isHps && isCellInvalid(studentId, 'WW', i);
+            return (
           <input 
             type="number"
             inputMode="decimal"
             defaultValue={isHps ? (wwScores[i]?.maxScore || 0) : (wwScores[i]?.score || '')}
             placeholder="0"
-            className={`${inputClass} ${isHps ? 'text-indigo-300 font-black' : 'text-slate-600'}`}
-            onBlur={(e) => {
-              const val = e.target.value === '' ? 0 : Number(e.target.value);
-              if (isHps) onHpsUpdate('WW', i, val);
-              else onScoreUpdate(studentId, 'WW', i, val);
+            className={`${inputClass} ${isHps ? 'text-indigo-300 font-black' : 'text-slate-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
+            onFocus={(e) => {
+              onCellFocus('WW', i);
+              e.currentTarget.select();
+              e.currentTarget.dataset.prev = e.currentTarget.value;
             }}
+            onBlur={(e) => {
+              if (isHps) {
+                const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
+                onHpsUpdate('WW', i, val);
+              } else {
+                onScoreCommit(e.currentTarget, studentId, 'WW', i);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || isHps) return;
+              e.preventDefault();
+              const didSave = onScoreCommit(e.currentTarget, studentId, 'WW', i);
+              if (!didSave) return;
+              const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="WW"][data-col="${i}"]`);
+              nextInput?.focus();
+            }}
+            data-row-index={isHps ? -1 : rowIndex}
+            data-cat="WW"
+            data-col={i}
           />
+            );
+          })()}
         </TableCell>
       ))}
-      <TableCell className={`text-center text-[10px] font-black border-r border-slate-100 ${isHps ? 'bg-slate-700' : 'bg-slate-50/50 text-slate-500'}`}>
+      <TableCell
+        className={`text-center text-[10px] font-black border-r border-b border-slate-100 ${isHps ? 'bg-slate-700 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-slate-50/50 text-slate-500'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? wwMaxTotal : wwTotal}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-indigo-600 border-r border-slate-100 bg-indigo-50/5">
+      <TableCell
+        className={`text-center font-black text-[10px] text-indigo-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-indigo-50/5'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? "100.0" : formatNum(displayWWPS)}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-indigo-700 border-r border-slate-200 bg-indigo-50/10">
+      <TableCell
+        className={`text-center font-black text-[10px] text-indigo-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-indigo-50/10'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? weights.ww.toFixed(1) : formatNum(displayWWWS)}
       </TableCell>
       
       {/* PT Individual */}
       {Array.from({ length: ptCount }).map((_, i) => (
-        <TableCell key={`pt-${i}`} className={cellClass}>
+        <TableCell
+          key={`pt-${i}`}
+          className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
+          style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+        >
+          {(() => {
+            const invalid = !isHps && isCellInvalid(studentId, 'PT', i);
+            return (
           <input 
             type="number"
             inputMode="decimal"
             defaultValue={isHps ? (ptScores[i]?.maxScore || 0) : (ptScores[i]?.score || '')}
             placeholder="0"
-            className={`${inputClass} ${isHps ? 'text-purple-300 font-black' : 'text-slate-600'}`}
-            onBlur={(e) => {
-              const val = e.target.value === '' ? 0 : Number(e.target.value);
-              if (isHps) onHpsUpdate('PT', i, val);
-              else onScoreUpdate(studentId, 'PT', i, val);
+            className={`${inputClass} ${isHps ? 'text-purple-300 font-black' : 'text-slate-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
+            onFocus={(e) => {
+              onCellFocus('PT', i);
+              e.currentTarget.select();
+              e.currentTarget.dataset.prev = e.currentTarget.value;
             }}
+            onBlur={(e) => {
+              if (isHps) {
+                const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
+                onHpsUpdate('PT', i, val);
+              } else {
+                onScoreCommit(e.currentTarget, studentId, 'PT', i);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || isHps) return;
+              e.preventDefault();
+              const didSave = onScoreCommit(e.currentTarget, studentId, 'PT', i);
+              if (!didSave) return;
+              const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="PT"][data-col="${i}"]`);
+              nextInput?.focus();
+            }}
+            data-row-index={isHps ? -1 : rowIndex}
+            data-cat="PT"
+            data-col={i}
           />
+            );
+          })()}
         </TableCell>
       ))}
-      <TableCell className={`text-center text-[10px] font-black border-r border-slate-100 ${isHps ? 'bg-slate-700' : 'bg-slate-50/50 text-slate-500'}`}>
+      <TableCell
+        className={`text-center text-[10px] font-black border-r border-b border-slate-100 ${isHps ? 'bg-slate-700 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-slate-50/50 text-slate-500'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? ptMaxTotal : ptTotal}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-purple-600 border-r border-slate-100 bg-purple-50/5">
+      <TableCell
+        className={`text-center font-black text-[10px] text-purple-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-purple-50/5'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? "100.0" : formatNum(displayPTPS)}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-purple-700 border-r border-slate-200 bg-purple-50/10">
+      <TableCell
+        className={`text-center font-black text-[10px] text-purple-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-purple-50/10'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? weights.pt.toFixed(1) : formatNum(displayPTWS)}
       </TableCell>
       
       {/* QA */}
-      <TableCell className={cellClass}>
+      <TableCell
+        className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
+        {(() => {
+          const invalid = !isHps && isCellInvalid(studentId, 'QA', 0);
+          return (
         <input 
           type="number"
           inputMode="decimal"
           defaultValue={isHps ? qaMax : (grade?.quarterlyAssessScore || '')}
           placeholder="0"
-          className={`${inputClass} ${isHps ? 'text-amber-300 font-black' : 'text-amber-600'}`}
-          onBlur={(e) => {
-            const val = e.target.value === '' ? 0 : Number(e.target.value);
-            if (isHps) onHpsUpdate('QA', 0, val);
-            else onScoreUpdate(studentId, 'QA', 0, val);
+          className={`${inputClass} ${isHps ? 'text-amber-300 font-black' : 'text-amber-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
+          onFocus={(e) => {
+            onCellFocus('QA', 0);
+            e.currentTarget.select();
+            e.currentTarget.dataset.prev = e.currentTarget.value;
           }}
+          onBlur={(e) => {
+            if (isHps) {
+              const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
+              onHpsUpdate('QA', 0, val);
+            } else {
+              onScoreCommit(e.currentTarget, studentId, 'QA', 0);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' || isHps) return;
+            e.preventDefault();
+            const didSave = onScoreCommit(e.currentTarget, studentId, 'QA', 0);
+            if (!didSave) return;
+            const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="QA"][data-col="0"]`);
+            nextInput?.focus();
+          }}
+          data-row-index={isHps ? -1 : rowIndex}
+          data-cat="QA"
+          data-col={0}
         />
+          );
+        })()}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-amber-600 border-r border-slate-100 bg-amber-50/10">
+      <TableCell
+        className={`text-center font-black text-[10px] text-amber-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-amber-50/10'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? "100.0" : formatNum(displayQAPS)}
       </TableCell>
-      <TableCell className="text-center font-black text-[10px] text-amber-700 border-r border-slate-200 bg-amber-50/20">
+      <TableCell
+        className={`text-center font-black text-[10px] text-amber-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-amber-50/20'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? weights.qa.toFixed(1) : formatNum(displayQAWS)}
       </TableCell>
       
       {/* Summary */}
-      <TableCell className="text-center font-black text-[10px] text-emerald-600 border-r border-slate-100 bg-emerald-50/10">
+      <TableCell
+        className={`text-center font-black text-[10px] text-emerald-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-emerald-50/10'}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? "100.0" : formatNum(displayInitialGrade)}
       </TableCell>
-      <TableCell className={`text-center font-black text-xs bg-emerald-100/30 ${isHps ? 'text-white' : getGradeColor(displayQuarterlyGrade)}`}>
+      <TableCell
+        className={`text-center font-black text-xs border-b border-slate-100 ${isHps ? 'text-white bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-emerald-100/30'} ${!isHps ? getGradeColor(displayQuarterlyGrade) : ''}`}
+        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
+      >
         {isHps ? "100" : (displayQuarterlyGrade ?? <span className="text-slate-300">—</span>)}
       </TableCell>
     </TableRow>
@@ -319,10 +451,18 @@ export default function ClassRecordView() {
   const [wwMeta, setWwMeta] = useState<AssessmentTaskMeta[]>([]);
   const [ptMeta, setPtMeta] = useState<AssessmentTaskMeta[]>([]);
   const [qaMeta, setQaMeta] = useState<{ description: string; date: string }>({ description: '', date: '' });
+  const [invalidCells, setInvalidCells] = useState<Record<string, string>>({});
+  const [metaEditorTarget, setMetaEditorTarget] = useState<{ category: 'WW' | 'PT' | 'QA'; index: number } | null>(null);
+  const [metaEditorDraft, setMetaEditorDraft] = useState<{ description: string; date: string }>({ description: '', date: '' });
+  const [savingMeta, setSavingMeta] = useState(false);
 
   const [separateByGender, setSeparateByGender] = useState(false);
   const ecrFileInputRef = useRef<HTMLInputElement>(null);
   const isHGClass = (classAssignment?.subject?.code ?? '').startsWith('HG');
+  const ledgerHeaderRef = useRef<HTMLDivElement | null>(null);
+  const [ledgerHeaderHeight, setLedgerHeaderHeight] = useState(0);
+  const assessmentDetailsRef = useRef<HTMLDivElement | null>(null);
+  const [assessmentDetailsHeight, setAssessmentDetailsHeight] = useState(0);
 
   // Dynamic Column Counts
   const wwCount = useMemo(() => {
@@ -399,23 +539,23 @@ export default function ClassRecordView() {
 
     setWwMeta((prev) =>
       Array.from({ length: wwCount }, (_, i) => ({
-        description: prev[i]?.description || wwSource[i]?.description || wwSource[i]?.name || `WW ${i + 1}`,
-        date: i === 0 ? (prev[0]?.date || wwSource[0]?.date || '') : (prev[0]?.date || wwSource[0]?.date || ''),
+        description: wwSource[i]?.description || wwSource[i]?.name || prev[i]?.description || `WW ${i + 1}`,
+        date: wwSource[i]?.date || prev[i]?.date || '',
       }))
     );
 
     setPtMeta((prev) =>
       Array.from({ length: ptCount }, (_, i) => ({
-        description: prev[i]?.description || ptSource[i]?.description || ptSource[i]?.name || `PT ${i + 1}`,
-        date: i === 0 ? (prev[0]?.date || ptSource[0]?.date || '') : (prev[0]?.date || ptSource[0]?.date || ''),
+        description: ptSource[i]?.description || ptSource[i]?.name || prev[i]?.description || `PT ${i + 1}`,
+        date: ptSource[i]?.date || prev[i]?.date || '',
       }))
     );
 
     setQaMeta((prev) => {
       const qaSample = gradeSamples.find((g) => g.qaDescription || g.qaDate);
       return {
-        description: prev.description || qaSample?.qaDescription || '',
-        date: prev.date || qaSample?.qaDate || '',
+        description: qaSample?.qaDescription || prev.description || '',
+        date: qaSample?.qaDate || prev.date || '',
       };
     });
   }, [classRecord, selectedQuarter, wwCount, ptCount]);
@@ -424,23 +564,148 @@ export default function ClassRecordView() {
     scores: ScoreItem[],
     category: 'WW' | 'PT',
     minLength = 0,
+    metaOverride?: AssessmentTaskMeta[],
   ): ScoreItem[] => {
-    const meta = category === 'WW' ? wwMeta : ptMeta;
-    const dateFromTopCell = meta[0]?.date || '';
+    const meta = metaOverride || (category === 'WW' ? wwMeta : ptMeta);
     const targetLength = Math.max(scores.length, minLength);
 
     return Array.from({ length: targetLength }, (_, i) => {
       const existing = scores[i] || ({ score: 0, maxScore: 10 } as ScoreItem);
       const description = meta[i]?.description?.trim() || `${category} ${i + 1}`;
+      const date = meta[i]?.date || '';
       return {
         ...existing,
         name: description,
         description,
-        date: dateFromTopCell || undefined,
+        date: date || undefined,
         maxScore: Number(existing.maxScore ?? 10),
         score: Number(existing.score ?? 0),
       };
     });
+  };
+
+  const getCellKey = (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => `${sid}:${cat}:${idx}`;
+
+  const getMaxForCell = (cat: 'WW' | 'PT' | 'QA', idx: number): number => {
+    if (cat === 'WW') return Number(hpsData.wwScores[idx]?.maxScore ?? 0);
+    if (cat === 'PT') return Number(hpsData.ptScores[idx]?.maxScore ?? 0);
+    return Number(hpsData.qaMax ?? 0);
+  };
+
+  const openMetaEditor = (category: 'WW' | 'PT' | 'QA', index: number) => {
+    setMetaEditorTarget({ category, index });
+    if (category === 'WW') {
+      setMetaEditorDraft({
+        description: wwMeta[index]?.description || `WW ${index + 1}`,
+        date: wwMeta[index]?.date || '',
+      });
+      return;
+    }
+    if (category === 'PT') {
+      setMetaEditorDraft({
+        description: ptMeta[index]?.description || `PT ${index + 1}`,
+        date: ptMeta[index]?.date || '',
+      });
+      return;
+    }
+    setMetaEditorDraft({
+      description: qaMeta.description || 'Quarterly Assessment',
+      date: qaMeta.date || '',
+    });
+  };
+
+  const saveColumnMeta = async () => {
+    if (!classAssignmentId || !metaEditorTarget) return;
+    const nextWwMeta = [...wwMeta];
+    const nextPtMeta = [...ptMeta];
+    const nextQaMeta = { ...qaMeta };
+
+    if (metaEditorTarget.category === 'WW') {
+      while (nextWwMeta.length <= metaEditorTarget.index) {
+        nextWwMeta.push({ description: `WW ${nextWwMeta.length + 1}`, date: '' });
+      }
+      nextWwMeta[metaEditorTarget.index] = {
+        description: metaEditorDraft.description || `WW ${metaEditorTarget.index + 1}`,
+        date: metaEditorDraft.date || '',
+      };
+    } else if (metaEditorTarget.category === 'PT') {
+      while (nextPtMeta.length <= metaEditorTarget.index) {
+        nextPtMeta.push({ description: `PT ${nextPtMeta.length + 1}`, date: '' });
+      }
+      nextPtMeta[metaEditorTarget.index] = {
+        description: metaEditorDraft.description || `PT ${metaEditorTarget.index + 1}`,
+        date: metaEditorDraft.date || '',
+      };
+    } else {
+      nextQaMeta.description = metaEditorDraft.description;
+      nextQaMeta.date = metaEditorDraft.date;
+    }
+
+    setWwMeta(nextWwMeta);
+    setPtMeta(nextPtMeta);
+    setQaMeta(nextQaMeta);
+
+    setSavingMeta(true);
+    try {
+      const updatePromises = classRecord.map((record) => {
+        const grade = record.grades.find((g) => g.quarter === selectedQuarter);
+        const wwScores = applyMetaToScores([...(grade?.writtenWorkScores || []) as ScoreItem[]], 'WW', wwCount, nextWwMeta);
+        const ptScores = applyMetaToScores([...(grade?.perfTaskScores || []) as ScoreItem[]], 'PT', ptCount, nextPtMeta);
+
+        return gradesApi.saveGrade({
+          studentId: record.student.id,
+          classAssignmentId,
+          quarter: selectedQuarter,
+          writtenWorkScores: wwScores,
+          perfTaskScores: ptScores,
+          qaDescription: nextQaMeta.description || undefined,
+          qaDate: nextQaMeta.date || undefined,
+        });
+      });
+
+      await Promise.all(updatePromises);
+      setSuccess('Assessment metadata applied to the selected column');
+      fetchClassRecord(true);
+    } catch (err: any) {
+      console.error('Failed to save column metadata:', err);
+      setError(err?.response?.data?.message || 'Failed to save assessment metadata');
+      fetchClassRecord(true);
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const isCellInvalid = (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => Boolean(invalidCells[getCellKey(sid, cat, idx)]);
+
+  const commitScoreInput = (
+    inputEl: HTMLInputElement,
+    studentId: string,
+    category: 'WW' | 'PT' | 'QA',
+    index: number,
+  ): boolean => {
+    const rawValue = inputEl.value;
+    const parsed = rawValue === '' ? 0 : Number(rawValue);
+    const key = getCellKey(studentId, category, index);
+    const maxAllowed = getMaxForCell(category, index);
+
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > maxAllowed) {
+      const prevValue = inputEl.dataset.prev ?? '';
+      inputEl.value = prevValue;
+      setInvalidCells((prev) => ({ ...prev, [key]: `Score cannot exceed ${maxAllowed}.` }));
+      setError(`${category} ${category === 'QA' ? '' : index + 1} score cannot exceed MAX (${maxAllowed}).`.trim());
+      return false;
+    }
+
+    setInvalidCells((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+
+    inputEl.dataset.prev = String(parsed);
+    handleScoreUpdate(studentId, category, index, parsed);
+    return true;
   };
 
   useEffect(() => {
@@ -462,6 +727,50 @@ export default function ClassRecordView() {
       return () => clearTimeout(timer);
     }
   }, [error, success]);
+
+  useEffect(() => {
+    const node = ledgerHeaderRef.current;
+    if (!node) {
+      setLedgerHeaderHeight(0);
+      return;
+    }
+    const update = () => setLedgerHeaderHeight(node.offsetHeight || 0);
+    update();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(update);
+      observer.observe(node);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [classAssignment?.id]);
+
+  useEffect(() => {
+    if (!showAssessmentDetails) {
+      setAssessmentDetailsHeight(0);
+      return;
+    }
+    const node = assessmentDetailsRef.current;
+    if (!node) return;
+    const update = () => setAssessmentDetailsHeight(node.offsetHeight || 0);
+    update();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(update);
+      observer.observe(node);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [showAssessmentDetails, wwCount, ptCount]);
+
 
   const fetchClassRecord = async (silent = false) => {
     if (!classAssignmentId) return;
@@ -524,6 +833,25 @@ export default function ClassRecordView() {
     newValue: number
   ) => {
     if (!classAssignmentId) return;
+
+    const key = getCellKey(studentId, category, index);
+    const maxAllowed = getMaxForCell(category, index);
+    if (newValue < 0) {
+      setInvalidCells((prev) => ({ ...prev, [key]: 'Score cannot be negative.' }));
+      setError('Score cannot be negative.');
+      return;
+    }
+    if (newValue > maxAllowed) {
+      setInvalidCells((prev) => ({ ...prev, [key]: `Score cannot exceed ${maxAllowed}.` }));
+      setError(`${category} ${category === 'QA' ? '' : index + 1} score cannot exceed MAX (${maxAllowed}).`.trim());
+      return;
+    }
+    setInvalidCells((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     
     // 1. Optimistic Local Update
     setClassRecord(prev => prev.map(record => {
@@ -704,9 +1032,9 @@ export default function ClassRecordView() {
   const addTask = async (category: 'WW' | 'PT') => {
     const targetIdx = category === 'WW' ? wwCount : ptCount;
     if (category === 'WW') {
-      setWwMeta((prev) => [...prev, { description: `WW ${targetIdx + 1}`, date: prev[0]?.date || '' }]);
+      setWwMeta((prev) => [...prev, { description: `WW ${targetIdx + 1}`, date: '' }]);
     } else {
-      setPtMeta((prev) => [...prev, { description: `PT ${targetIdx + 1}`, date: prev[0]?.date || '' }]);
+      setPtMeta((prev) => [...prev, { description: `PT ${targetIdx + 1}`, date: '' }]);
     }
     handleHpsUpdate(category, targetIdx, 10);
   };
@@ -806,28 +1134,24 @@ export default function ClassRecordView() {
     if (!classAssignmentId) return;
 
     try {
-      const updatePromises = classRecord
-        .map((record) => {
-          const grade = record.grades.find((g) => g.quarter === selectedQuarter);
-          if (!grade) return null;
+      const updatePromises = classRecord.map((record) => {
+        const grade = record.grades.find((g) => g.quarter === selectedQuarter);
+        const wwScores = applyMetaToScores([...(grade?.writtenWorkScores || []) as ScoreItem[]], 'WW', wwCount);
+        const ptScores = applyMetaToScores([...(grade?.perfTaskScores || []) as ScoreItem[]], 'PT', ptCount);
 
-          const wwScores = applyMetaToScores([...(grade.writtenWorkScores || []) as ScoreItem[]], 'WW');
-          const ptScores = applyMetaToScores([...(grade.perfTaskScores || []) as ScoreItem[]], 'PT');
-
-          return gradesApi.saveGrade({
-            studentId: record.student.id,
-            classAssignmentId,
-            quarter: selectedQuarter,
-            writtenWorkScores: wwScores,
-            perfTaskScores: ptScores,
-            qaDescription: qaMeta.description || undefined,
-            qaDate: qaMeta.date || undefined,
-          });
-        })
-        .filter(Boolean) as Promise<any>[];
+        return gradesApi.saveGrade({
+          studentId: record.student.id,
+          classAssignmentId,
+          quarter: selectedQuarter,
+          writtenWorkScores: wwScores,
+          perfTaskScores: ptScores,
+          qaDescription: qaMeta.description || undefined,
+          qaDate: qaMeta.date || undefined,
+        });
+      });
 
       if (updatePromises.length === 0) {
-        setSuccess('No existing scores yet. Metadata will apply as you start encoding.');
+        setSuccess('No learners to update yet.');
         return;
       }
 
@@ -905,6 +1229,13 @@ export default function ClassRecordView() {
   }
 
   if (!classAssignment) return null;
+  const headerRowHeight = 40;
+  const topNavHeight = 64;
+  const detailsTop = topNavHeight + Math.ceil(ledgerHeaderHeight);
+  const stickyTop = topNavHeight + Math.ceil(ledgerHeaderHeight) + (showAssessmentDetails ? Math.ceil(assessmentDetailsHeight) : 0);
+  const headerTop = Math.floor(stickyTop);
+  const subHeaderTop = headerTop + 39; // 1px overlap
+  const hpsTop = subHeaderTop + 39; // 1px overlap
   const isArchivedAssignment = classAssignment.isActive === false;
 
   return (
@@ -1078,63 +1409,121 @@ export default function ClassRecordView() {
 
       {/* Main Ledger Table */}
       {!isHGClass && (
-      <Card className="border-0 shadow-2xl shadow-slate-200/40 rounded-[2.5rem] overflow-hidden bg-white">
-        <CardHeader className="p-8 border-0 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-          <div className="flex items-center gap-8">
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Class Ledger</h2>
-            <div className="flex items-center bg-slate-50 p-1 rounded-2xl border border-slate-100 shadow-inner">
-              <Button 
-                variant="ghost" 
-                onClick={() => setSeparateByGender(false)} 
-                className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+      <Card className="border-0 shadow-2xl shadow-slate-200/40 rounded-[2.5rem] overflow-visible bg-white">
+        <div ref={ledgerHeaderRef} className="sticky z-40 bg-white" style={{ top: topNavHeight }}>
+          <CardHeader className="p-8 border-0 flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-white">
+            <div className="flex items-center gap-8">
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Class Ledger</h2>
+              <div className="flex items-center bg-slate-50 p-1 rounded-2xl border border-slate-100 shadow-inner">
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setSeparateByGender(false)} 
+                  className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Alphabetical
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setSeparateByGender(true)} 
+                  className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Gendered
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <Button
+                variant="outline"
+                className={`h-11 rounded-xl border-slate-200 font-bold ${showAssessmentDetails ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'text-slate-600'}`}
+                onClick={() => setShowAssessmentDetails((prev) => !prev)}
               >
-                Alphabetical
+                Optional Assessment Details
               </Button>
-              <Button 
-                variant="ghost" 
-                onClick={() => setSeparateByGender(true)} 
-                className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                Gendered
-              </Button>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Period:</span>
+              <Select value={selectedQuarter} onValueChange={(val) => val && setSelectedQuarter(val)}>
+                <SelectTrigger className="h-11 w-40 bg-white border-slate-200 text-sm font-black uppercase rounded-xl shadow-sm px-6">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-slate-200 shadow-2xl p-2">
+                  {quarters.map((q) => (
+                    <SelectItem key={q} value={q} className="text-xs font-black uppercase rounded-lg py-2.5 px-4 focus:bg-indigo-50 focus:text-indigo-600 transition-colors cursor-pointer">
+                      {q}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+        </div>
+
+        {metaEditorTarget && (
+          <div className="mx-8 -mt-1 mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
+                    {metaEditorTarget.category} {metaEditorTarget.category === 'QA' ? '' : metaEditorTarget.index + 1} Description (Optional)
+                  </p>
+                  <input
+                    type="text"
+                    value={metaEditorDraft.description}
+                    onChange={(e) => setMetaEditorDraft((prev) => ({ ...prev, description: e.target.value }))}
+                    placeholder={`${metaEditorTarget.category} description`}
+                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Column Date (Applies To All Students)</p>
+                  <input
+                    type="date"
+                    value={metaEditorDraft.date}
+                    onChange={(e) => setMetaEditorDraft((prev) => ({ ...prev, date: e.target.value }))}
+                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  className="h-9 rounded-lg text-xs font-bold"
+                  onClick={() => setMetaEditorTarget(null)}
+                  disabled={savingMeta}
+                >
+                  Close
+                </Button>
+                <Button
+                  className="h-9 rounded-lg text-xs font-black uppercase tracking-widest bg-slate-900 hover:bg-slate-800 text-white"
+                  onClick={saveColumnMeta}
+                  disabled={savingMeta}
+                >
+                  {savingMeta ? 'Applying...' : 'Apply'}
+                </Button>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              className={`h-11 rounded-xl border-slate-200 font-bold ${showAssessmentDetails ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'text-slate-600'}`}
-              onClick={() => setShowAssessmentDetails((prev) => !prev)}
-            >
-              Optional Assessment Details
-            </Button>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Period:</span>
-            <Select value={selectedQuarter} onValueChange={(val) => val && setSelectedQuarter(val)}>
-              <SelectTrigger className="h-11 w-40 bg-white border-slate-200 text-sm font-black uppercase rounded-xl shadow-sm px-6">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-slate-200 shadow-2xl p-2">
-                {quarters.map((q) => (
-                  <SelectItem key={q} value={q} className="text-xs font-black uppercase rounded-lg py-2.5 px-4 focus:bg-indigo-50 focus:text-indigo-600 transition-colors cursor-pointer">
-                    {q}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
+        )}
 
         {showAssessmentDetails && (
-          <div className="mx-8 mb-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+          <div
+            ref={assessmentDetailsRef}
+            className="mx-8 mb-4 rounded-2xl border border-slate-200 bg-white p-4 sticky z-40 shadow-sm"
+            style={{ top: detailsTop }}
+          >
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="rounded-xl bg-white border border-indigo-100 p-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mb-3">Written Work (Optional)</p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Top Date (applies to all WW)</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">WW 1 Date</label>
                 <input
                   type="date"
                   value={wwMeta[0]?.date || ''}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setWwMeta((prev) => prev.map((m) => ({ ...m, date: val })));
+                    setWwMeta((prev) => {
+                      const next = [...prev];
+                      while (next.length < wwCount) next.push({ description: `WW ${next.length + 1}`, date: '' });
+                      next[0] = { ...(next[0] || { description: 'WW 1', date: '' }), date: val };
+                      return next;
+                    });
                   }}
                   className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
                 />
@@ -1160,13 +1549,18 @@ export default function ClassRecordView() {
 
               <div className="rounded-xl bg-white border border-purple-100 p-3">
                 <p className="text-[10px] font-black uppercase tracking-widest text-purple-600 mb-3">Performance Tasks (Optional)</p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Top Date (applies to all PT)</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">PT 1 Date</label>
                 <input
                   type="date"
                   value={ptMeta[0]?.date || ''}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setPtMeta((prev) => prev.map((m) => ({ ...m, date: val })));
+                    setPtMeta((prev) => {
+                      const next = [...prev];
+                      while (next.length < ptCount) next.push({ description: `PT ${next.length + 1}`, date: '' });
+                      next[0] = { ...(next[0] || { description: 'PT 1', date: '' }), date: val };
+                      return next;
+                    });
                   }}
                   className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
                 />
@@ -1215,13 +1609,23 @@ export default function ClassRecordView() {
           </div>
         )}
 
-        <div className="overflow-x-auto border-t border-slate-100">
-          <Table className="border-collapse table-fixed w-max min-w-full">
-            <TableHeader>
+        <div className="relative overflow-visible border-t border-slate-100">
+          <Table className="border-separate border-spacing-0 table-fixed w-max min-w-full">
+            <TableHeader className="bg-slate-50">
               {/* Grouped Header Row */}
-              <TableRow className="hover:bg-transparent border-0 bg-slate-50/50 h-10">
-                <TableHead colSpan={3} className="border-r border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center px-0 w-[400px]">LEARNER INFORMATION</TableHead>
-                <TableHead colSpan={wwCount + 3} className="border-r border-slate-200 text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center px-0 bg-indigo-50/30">
+              <TableRow className="hover:bg-transparent border-0 bg-slate-50 h-10 transition-none">
+                <TableHead
+                  colSpan={3}
+                  className="border-r border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center px-0 w-[400px] bg-slate-50 sticky z-30 bg-clip-padding"
+                  style={{ top: headerTop }}
+                >
+                  LEARNER INFORMATION
+                </TableHead>
+                <TableHead
+                  colSpan={wwCount + 3}
+                  className="border-r border-b border-slate-200 text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center px-0 bg-indigo-50 sticky z-30 bg-clip-padding"
+                  style={{ top: headerTop }}
+                >
                   <div className="flex items-center justify-center gap-3">
                     WRITTEN WORK ({effectiveWeights?.ww ?? classAssignment.subject.writtenWorkWeight}%)
                     <Button 
@@ -1243,7 +1647,11 @@ export default function ClassRecordView() {
                     </Button>
                   </div>
                 </TableHead>
-                <TableHead colSpan={ptCount + 3} className="border-r border-slate-200 text-[10px] font-black text-purple-600 uppercase tracking-widest text-center px-0 bg-purple-50/30">
+                <TableHead
+                  colSpan={ptCount + 3}
+                  className="border-r border-b border-slate-200 text-[10px] font-black text-purple-600 uppercase tracking-widest text-center px-0 bg-purple-50 sticky z-30 bg-clip-padding"
+                  style={{ top: headerTop }}
+                >
                   <div className="flex items-center justify-center gap-3">
                     PERF. TASKS ({effectiveWeights?.pt ?? classAssignment.subject.perfTaskWeight}%)
                     <Button 
@@ -1265,38 +1673,132 @@ export default function ClassRecordView() {
                     </Button>
                   </div>
                 </TableHead>
-                <TableHead colSpan={3} className="border-r border-slate-200 text-[10px] font-black text-amber-600 uppercase tracking-widest text-center px-0 bg-amber-50/30">QA ({effectiveWeights?.qa ?? classAssignment.subject.quarterlyAssessWeight}%)</TableHead>
-                <TableHead colSpan={2} className="text-[10px] font-black text-emerald-600 uppercase tracking-widest text-center px-0 bg-emerald-50/30 uppercase tracking-widest">Summary</TableHead>
+                <TableHead
+                  colSpan={3}
+                  className="border-r border-b border-slate-200 text-[10px] font-black text-amber-600 uppercase tracking-widest text-center px-0 bg-amber-50 sticky z-30 bg-clip-padding"
+                  style={{ top: headerTop }}
+                >
+                  QA ({effectiveWeights?.qa ?? classAssignment.subject.quarterlyAssessWeight}%)
+                </TableHead>
+                <TableHead
+                  colSpan={2}
+                  className="border-b border-slate-200 text-[10px] font-black text-emerald-600 uppercase tracking-widest text-center px-0 bg-emerald-50 sticky z-30 bg-clip-padding"
+                  style={{ top: headerTop }}
+                >
+                  Summary
+                </TableHead>
               </TableRow>
               {/* Detailed Header Row */}
-              <TableRow className="hover:bg-transparent border-b border-slate-200 h-10">
-                <TableHead className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-slate-100">#</TableHead>
-                <TableHead className="w-28 text-[9px] font-black text-slate-400 uppercase border-r border-slate-100 px-3">LRN</TableHead>
-                <TableHead className="w-56 text-[9px] font-black text-slate-400 uppercase border-r border-slate-200 px-3">Full Name</TableHead>
+              <TableRow className="hover:bg-transparent border-0 h-10 bg-white transition-none">
+                <TableHead
+                  className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  #
+                </TableHead>
+                <TableHead
+                  className="w-28 text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 px-3 bg-white sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  LRN
+                </TableHead>
+                <TableHead
+                  className="w-56 text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-200 px-3 bg-white sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  Full Name
+                </TableHead>
                 
                 {/* Dynamic WW Columns */}
                 {Array.from({ length: wwCount }).map((_, i) => (
-                  <TableHead key={`h-ww-${i}`} className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-slate-100">{i + 1}</TableHead>
+                  <TableHead
+                    key={`h-ww-${i}`}
+                    className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
+                    style={{ top: subHeaderTop }}
+                  >
+                    {i + 1}
+                  </TableHead>
                 ))}
-                <TableHead className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-slate-100 bg-slate-100/50">Total</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-indigo-600 uppercase border-r border-slate-100 bg-indigo-50/30">PS</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-indigo-700 uppercase border-r border-slate-200 bg-indigo-100/50">WS</TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-b border-slate-100 bg-slate-100 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  Total
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-indigo-600 uppercase border-r border-b border-slate-100 bg-indigo-50 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  PS
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-indigo-700 uppercase border-r border-b border-slate-200 bg-indigo-100 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  WS
+                </TableHead>
                 
                 {/* Dynamic PT Columns */}
                 {Array.from({ length: ptCount }).map((_, i) => (
-                  <TableHead key={`h-pt-${i}`} className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-slate-100">{i + 1}</TableHead>
+                  <TableHead
+                    key={`h-pt-${i}`}
+                    className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
+                    style={{ top: subHeaderTop }}
+                  >
+                    {i + 1}
+                  </TableHead>
                 ))}
-                <TableHead className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-slate-100 bg-slate-100/50">Total</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-purple-600 uppercase border-r border-slate-100 bg-purple-50/30">PS</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-purple-700 uppercase border-r border-slate-200 bg-purple-100/50">WS</TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-b border-slate-100 bg-slate-100 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  Total
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-purple-600 uppercase border-r border-b border-slate-100 bg-purple-50 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  PS
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-purple-700 uppercase border-r border-b border-slate-200 bg-purple-100 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  WS
+                </TableHead>
                 
                 {/* QA */}
-                <TableHead className="w-14 text-center text-[9px] font-black text-amber-600 uppercase border-r border-slate-100 bg-amber-50/20">SCORE</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-amber-600 uppercase border-r border-slate-100 bg-amber-50/30">PS</TableHead>
-                <TableHead className="w-12 text-center text-[9px] font-black text-amber-700 uppercase border-r border-slate-200 bg-amber-100/50">WS</TableHead>
+                <TableHead
+                  className="w-14 text-center text-[9px] font-black text-amber-600 uppercase border-r border-b border-slate-100 bg-amber-50 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  SCORE
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-amber-600 uppercase border-r border-b border-slate-100 bg-amber-50 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  PS
+                </TableHead>
+                <TableHead
+                  className="w-12 text-center text-[9px] font-black text-amber-700 uppercase border-r border-b border-slate-200 bg-amber-100 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  WS
+                </TableHead>
                 
-                <TableHead className="w-16 text-center text-[9px] font-black text-emerald-600 uppercase border-r border-slate-100 bg-emerald-50/20">INITIAL</TableHead>
-                <TableHead className="w-16 text-center text-[9px] font-black text-slate-900 uppercase bg-emerald-100/50 font-bold">FINAL</TableHead>
+                <TableHead
+                  className="w-16 text-center text-[9px] font-black text-emerald-600 uppercase border-r border-b border-slate-100 bg-emerald-50 sticky z-30 bg-clip-padding"
+                  style={{ top: subHeaderTop }}
+                >
+                  INITIAL
+                </TableHead>
+                <TableHead
+                  className="w-16 text-center text-[9px] font-black text-slate-900 uppercase bg-emerald-100 font-bold sticky z-30 bg-clip-padding border-b border-slate-200"
+                  style={{ top: subHeaderTop }}
+                >
+                  FINAL
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1308,20 +1810,25 @@ export default function ClassRecordView() {
                 };
 
                 const rows = [];
+                let rowCounter = 0;
                 // HPS (Benchmark) row
                 rows.push(
                   <LedgerRow 
                     key="HPS-ROW" 
                     record={null} 
                     idx={0} 
+                    rowIndex={-1}
                     isHps={true} 
+                    hpsStickyTop={hpsTop}
                     hpsData={hpsData}
                     selectedQuarter={selectedQuarter} 
                     wwCount={wwCount} 
                     ptCount={ptCount} 
                     weights={weights} 
-                    onScoreUpdate={handleScoreUpdate} 
                     onHpsUpdate={handleHpsUpdate} 
+                    onScoreCommit={commitScoreInput}
+                    onCellFocus={openMetaEditor}
+                    isCellInvalid={isCellInvalid}
                   />
                 );
 
@@ -1342,12 +1849,15 @@ export default function ClassRecordView() {
                         key={r.student.id} 
                         record={r} 
                         idx={i} 
+                        rowIndex={rowCounter++}
                         selectedQuarter={selectedQuarter} 
                         wwCount={wwCount} 
                         ptCount={ptCount} 
                         weights={weights} 
-                        onScoreUpdate={handleScoreUpdate} 
                         onHpsUpdate={handleHpsUpdate} 
+                        onScoreCommit={commitScoreInput}
+                        onCellFocus={openMetaEditor}
+                        isCellInvalid={isCellInvalid}
                       />
                     ));
                   }
@@ -1367,12 +1877,15 @@ export default function ClassRecordView() {
                         key={r.student.id} 
                         record={r} 
                         idx={i} 
+                        rowIndex={rowCounter++}
                         selectedQuarter={selectedQuarter} 
                         wwCount={wwCount} 
                         ptCount={ptCount} 
                         weights={weights} 
-                        onScoreUpdate={handleScoreUpdate} 
                         onHpsUpdate={handleHpsUpdate} 
+                        onScoreCommit={commitScoreInput}
+                        onCellFocus={openMetaEditor}
+                        isCellInvalid={isCellInvalid}
                       />
                     ));
                   }
@@ -1382,12 +1895,15 @@ export default function ClassRecordView() {
                       key={r.student.id} 
                       record={r} 
                       idx={i} 
+                      rowIndex={rowCounter++}
                       selectedQuarter={selectedQuarter} 
                       wwCount={wwCount} 
                       ptCount={ptCount} 
                       weights={weights} 
-                      onScoreUpdate={handleScoreUpdate} 
                       onHpsUpdate={handleHpsUpdate} 
+                      onScoreCommit={commitScoreInput}
+                      onCellFocus={openMetaEditor}
+                      isCellInvalid={isCellInvalid}
                     />
                   ));
                 }
