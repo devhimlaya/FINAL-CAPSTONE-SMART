@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import fs from 'fs';
 import path from 'path';
 
-import { prisma } from './src/lib/prisma';
+import { prisma } from '../src/lib/prisma';
 
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

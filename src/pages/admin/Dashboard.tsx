@@ -72,9 +72,11 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const { colors } = useTheme();
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const response = await adminApi.getDashboard();
       setData(response.data);
       setError(null);
@@ -82,12 +84,20 @@ export default function AdminDashboard() {
       console.error("Failed to fetch dashboard:", err);
       setError("Failed to load dashboard data");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchDashboard();
+    void fetchDashboard();
+
+    const poller = window.setInterval(() => {
+      void fetchDashboard(true);
+    }, 60000);
+
+    return () => window.clearInterval(poller);
   }, []);
 
   if (loading) {

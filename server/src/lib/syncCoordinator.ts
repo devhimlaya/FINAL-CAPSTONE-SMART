@@ -19,13 +19,18 @@ import { runEnrollProSync, getEnrollProSyncStatus } from './enrollproSync';
 import { runAtlasSync, getSyncStatus as getAtlasSyncStatus } from './atlasSync';
 import { syncEnrollProBranding } from './enrollproBrandingSync';
 import { broadcastSyncStatus } from './sseManager';
+import { prisma } from './prisma';
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-const SYNC_INTERVAL_MINUTES = parseInt(process.env.SYNC_INTERVAL_MINUTES ?? '5', 10);
+const SYNC_INTERVAL_MINUTES = parseInt(process.env.SYNC_INTERVAL_MINUTES ?? '60', 10);
 const BRANDING_SYNC_EVERY_N_CYCLES = parseInt(process.env.BRANDING_SYNC_EVERY_N_CYCLES ?? '12', 10); // 12 × 5min = 60min
 const INITIAL_DELAY_MS = parseInt(process.env.SYNC_INITIAL_DELAY_MS ?? '5000', 10); // 5s after boot
+const ENROLLPRO_BASE = (process.env.ENROLLPRO_URL ?? process.env.ENROLLPRO_BASE_URL ?? 'https://dev-jegs.buru-degree.ts.net/api').replace(/\/$/, '');
+const ATLAS_BASE = (process.env.ATLAS_URL ?? process.env.ATLAS_BASE_URL ?? 'http://100.88.55.125:5001/api/v1').replace(/\/$/, '');
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = parseInt(process.env.SYNC_CIRCUIT_BREAKER_FAILURE_THRESHOLD ?? '3', 10);
+const CIRCUIT_BREAKER_COOLDOWN_MS = parseInt(process.env.SYNC_CIRCUIT_BREAKER_COOLDOWN_MS ?? '300000', 10);
 
 // ---------------------------------------------------------------------------
 // State
@@ -35,13 +40,20 @@ let syncCycleCount = 0;
 let lastFullSyncAt: Date | null = null;
 let lastSyncResult: UnifiedSyncResult | null = null;
 let _schedulerTimer: NodeJS.Timeout | null = null;
+let consecutiveCriticalFailures = 0;
+let circuitOpenedAt: Date | null = null;
+let circuitOpenReason: string | null = null;
+let lastDependencyHealth: DependencyHealthSnapshot | null = null;
 
 export interface UnifiedSyncResult {
   timestamp: string;
   durationMs: number;
   enrollpro: {
     advisoriesSynced: number;
+    studentsFetched: number;
     studentsSynced: number;
+    studentsSkipped: number;
+    studentsDropped: number;
     teachersMatched: number;
     errors: string[];
   } | null;
@@ -54,6 +66,21 @@ export interface UnifiedSyncResult {
   } | null;
   branding: boolean;
   error?: string;
+}
+
+export interface DependencyHealth {
+  name: string;
+  url: string;
+  online: boolean;
+  httpStatus: number | null;
+  latencyMs: number;
+  error?: string;
+}
+
+export interface DependencyHealthSnapshot {
+  checkedAt: string;
+  enrollpro: DependencyHealth;
+  atlas: DependencyHealth;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,15 +99,102 @@ export async function runUnifiedSync(options?: {
   forceBranding?: boolean;
   source?: string;
 }): Promise<UnifiedSyncResult> {
+  const source = options?.source ?? 'scheduled';
+
   if (syncRunning) {
     console.log('[SyncCoordinator] Sync already running, skipping.');
-    return lastSyncResult ?? buildEmptyResult('skipped — already running');
+    const skippedResult = lastSyncResult ?? buildEmptyResult('skipped — already running');
+    await persistSyncHistory({
+      source,
+      status: 'SKIPPED',
+      startedAt: new Date(),
+      completedAt: new Date(),
+      result: skippedResult,
+      metadata: { reason: 'already-running' },
+    });
+    return skippedResult;
   }
+
+  if (isCircuitOpen()) {
+    const skippedAt = new Date();
+    const skippedResult = buildEmptyResult(`skipped — circuit breaker open (${circuitOpenReason ?? 'critical dependency unavailable'})`);
+    lastSyncResult = skippedResult;
+
+    broadcastSyncStatus({
+      type: 'SYNC_SKIPPED',
+      source,
+      timestamp: skippedAt.toISOString(),
+      reason: skippedResult.error,
+    });
+
+    await persistSyncHistory({
+      source,
+      status: 'SKIPPED',
+      startedAt: skippedAt,
+      completedAt: skippedAt,
+      result: skippedResult,
+      metadata: {
+        reason: 'circuit-open',
+        circuitOpenedAt: circuitOpenedAt?.toISOString() ?? null,
+        consecutiveCriticalFailures,
+        lastDependencyHealth,
+      },
+    });
+
+    return skippedResult;
+  }
+
+  const dependencySnapshot = await checkCriticalDependencies();
+  lastDependencyHealth = dependencySnapshot;
+
+  if (!dependencySnapshot.enrollpro.online || !dependencySnapshot.atlas.online) {
+    consecutiveCriticalFailures += 1;
+    const skippedAt = new Date();
+    const reason = `skipped — dependency offline (EnrollPro: ${dependencySnapshot.enrollpro.online ? 'online' : 'offline'}, Atlas: ${dependencySnapshot.atlas.online ? 'online' : 'offline'})`;
+    const skippedResult = buildEmptyResult(reason);
+    lastSyncResult = skippedResult;
+
+    if (consecutiveCriticalFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+      circuitOpenedAt = new Date();
+      circuitOpenReason = reason;
+      console.warn(
+        `[SyncCoordinator] Circuit breaker opened after ${consecutiveCriticalFailures} failed dependency checks. Cooldown: ${CIRCUIT_BREAKER_COOLDOWN_MS}ms.`,
+      );
+    }
+
+    broadcastSyncStatus({
+      type: 'SYNC_SKIPPED',
+      source,
+      timestamp: skippedAt.toISOString(),
+      reason,
+      dependencies: dependencySnapshot,
+    });
+
+    await persistSyncHistory({
+      source,
+      status: 'SKIPPED',
+      startedAt: skippedAt,
+      completedAt: skippedAt,
+      result: skippedResult,
+      metadata: {
+        reason: 'dependency-offline',
+        dependencySnapshot,
+        consecutiveCriticalFailures,
+        circuitOpenedAt: circuitOpenedAt?.toISOString() ?? null,
+      },
+    });
+
+    return skippedResult;
+  }
+
+  consecutiveCriticalFailures = 0;
+  circuitOpenedAt = null;
+  circuitOpenReason = null;
 
   syncRunning = true;
   syncCycleCount++;
+  const startedAt = new Date();
   const startTime = Date.now();
-  const source = options?.source ?? 'scheduled';
 
   console.log(`\n[SyncCoordinator] ===== Sync cycle #${syncCycleCount} started (${source}) ${new Date().toISOString()} =====`);
 
@@ -105,14 +219,25 @@ export async function runUnifiedSync(options?: {
       if (epResult) {
         enrollproResult = {
           advisoriesSynced: epResult.advisoriesSynced,
+          studentsFetched: epResult.studentsFetched,
           studentsSynced: epResult.studentsSynced,
+          studentsSkipped: epResult.studentsSkipped,
+          studentsDropped: epResult.studentsDropped,
           teachersMatched: epResult.teachersMatched,
           errors: epResult.errors,
         };
       }
     } catch (err: any) {
       console.error('[SyncCoordinator] EnrollPro sync failed:', err.message);
-      enrollproResult = { advisoriesSynced: 0, studentsSynced: 0, teachersMatched: 0, errors: [err.message] };
+      enrollproResult = {
+        advisoriesSynced: 0,
+        studentsFetched: 0,
+        studentsSynced: 0,
+        studentsSkipped: 0,
+        studentsDropped: 0,
+        teachersMatched: 0,
+        errors: [err.message],
+      };
     }
 
     // ── Step 2: Atlas Sync ──────────────────────────────────────────────
@@ -170,7 +295,9 @@ export async function runUnifiedSync(options?: {
 
   console.log(
     `[SyncCoordinator] ===== Sync cycle #${syncCycleCount} complete in ${durationMs}ms =====\n` +
-    `  EnrollPro: ${enrollproResult?.studentsSynced ?? 0} students, ${enrollproResult?.advisoriesSynced ?? 0} advisories\n` +
+    `  EnrollPro: ${enrollproResult?.studentsFetched ?? 0} fetched, ${enrollproResult?.studentsSynced ?? 0} updated, ` +
+    `${enrollproResult?.studentsSkipped ?? 0} unchanged, ${enrollproResult?.studentsDropped ?? 0} dropped, ` +
+    `${enrollproResult?.advisoriesSynced ?? 0} advisories\n` +
     `  Atlas:     ${atlasResult?.created ?? 0} assignments created, ${atlasResult?.matched ?? 0} teachers matched\n` +
     `  Branding:  ${brandingSynced ? 'synced' : 'skipped'}\n`
   );
@@ -183,7 +310,10 @@ export async function runUnifiedSync(options?: {
     durationMs,
     result: {
       enrollpro: enrollproResult ? {
-        students: enrollproResult.studentsSynced,
+        studentsFetched: enrollproResult.studentsFetched,
+        studentsUpdated: enrollproResult.studentsSynced,
+        studentsUnchanged: enrollproResult.studentsSkipped,
+        studentsDropped: enrollproResult.studentsDropped,
         advisories: enrollproResult.advisoriesSynced,
         errors: enrollproResult.errors.length,
       } : null,
@@ -192,6 +322,18 @@ export async function runUnifiedSync(options?: {
         matched: atlasResult.matched,
         errors: atlasResult.errors.length,
       } : null,
+    },
+  });
+
+  await persistSyncHistory({
+    source,
+    status: error ? 'FAILED' : 'SUCCESS',
+    startedAt,
+    completedAt: lastFullSyncAt,
+    result: lastSyncResult,
+    metadata: {
+      cycle: syncCycleCount,
+      dependencySnapshot,
     },
   });
 
@@ -270,7 +412,10 @@ export function getUnifiedSyncStatus() {
     config: {
       intervalMinutes: SYNC_INTERVAL_MINUTES,
       brandingEveryNCycles: BRANDING_SYNC_EVERY_N_CYCLES,
+      circuitBreakerFailureThreshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+      circuitBreakerCooldownMs: CIRCUIT_BREAKER_COOLDOWN_MS,
     },
+    circuitBreaker: getSyncCircuitBreakerStatus(),
     subsystems: {
       enrollpro: getEnrollProSyncStatus(),
       atlas: getAtlasSyncStatus(),
@@ -286,9 +431,111 @@ export function getLastUnifiedSyncResult(): UnifiedSyncResult | null {
   return lastSyncResult;
 }
 
+export function getSyncCircuitBreakerStatus() {
+  const open = isCircuitOpen();
+  return {
+    open,
+    openedAt: circuitOpenedAt?.toISOString() ?? null,
+    reason: circuitOpenReason,
+    consecutiveCriticalFailures,
+    failureThreshold: CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    cooldownMs: CIRCUIT_BREAKER_COOLDOWN_MS,
+    lastDependencyHealth,
+  };
+}
+
+export async function getRecentSyncHistory(limit = 25) {
+  const safeLimit = Math.max(1, Math.min(100, limit));
+  return prisma.syncHistory.findMany({
+    take: safeLimit,
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function buildUrl(base: string, path: string): string {
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+async function pingUrl(url: string, name: string): Promise<DependencyHealth> {
+  const started = Date.now();
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return {
+      name,
+      url,
+      online: response.ok,
+      httpStatus: response.status,
+      latencyMs: Date.now() - started,
+      ...(response.ok ? {} : { error: `HTTP ${response.status}` }),
+    };
+  } catch (error) {
+    return {
+      name,
+      url,
+      online: false,
+      httpStatus: null,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+async function checkCriticalDependencies(): Promise<DependencyHealthSnapshot> {
+  const [enrollpro, atlas] = await Promise.all([
+    pingUrl(buildUrl(ENROLLPRO_BASE, '/integration/v1/health'), 'EnrollPro'),
+    pingUrl(buildUrl(ATLAS_BASE, '/health'), 'Atlas'),
+  ]);
+
+  return {
+    checkedAt: new Date().toISOString(),
+    enrollpro,
+    atlas,
+  };
+}
+
+function isCircuitOpen(): boolean {
+  if (!circuitOpenedAt) return false;
+  const elapsed = Date.now() - circuitOpenedAt.getTime();
+  if (elapsed >= CIRCUIT_BREAKER_COOLDOWN_MS) {
+    circuitOpenedAt = null;
+    circuitOpenReason = null;
+    consecutiveCriticalFailures = 0;
+    return false;
+  }
+  return true;
+}
+
+async function persistSyncHistory(params: {
+  source: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  startedAt: Date;
+  completedAt: Date;
+  result: UnifiedSyncResult;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await prisma.syncHistory.create({
+      data: {
+        source: params.source,
+        status: params.status,
+        durationMs: params.result.durationMs,
+        startedAt: params.startedAt,
+        completedAt: params.completedAt,
+        enrollpro: params.result.enrollpro as any,
+        atlas: params.result.atlas as any,
+        branding: params.result.branding,
+        error: params.result.error,
+        metadata: params.metadata as any,
+      },
+    });
+  } catch (error) {
+    console.error('[SyncCoordinator] Failed to persist sync history:', error);
+  }
+}
 
 function buildEmptyResult(error: string): UnifiedSyncResult {
   return {

@@ -96,6 +96,7 @@ export default function SchoolForms() {
   const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [schoolYear, setSchoolYear] = useState("2026-2027");
+  const [schoolYears, setSchoolYears] = useState<string[]>(["2026-2027"]);
   const [sections, setSections] = useState<Section[]>([]);
   const [selectedSection, setSelectedSection] = useState<string>("");
   const [students, setStudents] = useState<FormStudent[]>([]);
@@ -108,6 +109,17 @@ export default function SchoolForms() {
   const [sf8Data, setSf8Data] = useState<any>(null);
   const [sf9Data, setSf9Data] = useState<any>(null);
   const [sf10Data, setSf10Data] = useState<any>(null);
+
+  // Load school years on mount
+  useEffect(() => {
+    registrarApi.getSchoolYears().then((res) => {
+      const sysYears = res.data.schoolYears;
+      if (sysYears && sysYears.length > 0) {
+        setSchoolYears(sysYears);
+        setSchoolYear(sysYears[0]);
+      }
+    }).catch(console.error);
+  }, []);
 
   // Load sections on mount
   useEffect(() => {
@@ -259,9 +271,9 @@ export default function SchoolForms() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="2026-2027">2026-2027</SelectItem>
-                    <SelectItem value="2025-2026">2025-2026</SelectItem>
-                    <SelectItem value="2024-2025">2024-2025</SelectItem>
+                    {schoolYears.map((sy) => (
+                      <SelectItem key={sy} value={sy}>{sy}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -401,7 +413,7 @@ export default function SchoolForms() {
                         {student.lastName}, {student.firstName} {student.middleName || ""} {student.suffix || ""}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={student.gender === "Male" ? "text-blue-600" : "text-pink-600"}>
+                        <Badge variant="outline" className={(student.gender ?? "").toLowerCase() === "male" ? "text-blue-600" : "text-pink-600"}>
                           {student.gender}
                         </Badge>
                       </TableCell>

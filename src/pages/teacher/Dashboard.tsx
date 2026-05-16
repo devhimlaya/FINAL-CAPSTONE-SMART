@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { gradesApi, type ClassAssignment } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
@@ -681,31 +682,33 @@ export default function TeacherDashboard() {
         </CardHeader>
         <CardContent className="p-8 pt-0">
           {stats?.summary.studentsAtRisk && stats.summary.studentsAtRisk.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {stats.summary.studentsAtRisk.map((student, idx) => (
-                <div key={idx} className="p-6 rounded-3xl bg-rose-50/40 border border-rose-100 hover:bg-rose-50 hover:border-rose-200 transition-all flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-rose-500 shrink-0">
-                      <Users className="w-6 h-6" />
+            <ScrollArea className="h-[350px] pr-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-4">
+                {stats.summary.studentsAtRisk.map((student, idx) => (
+                  <div key={idx} className="p-6 rounded-3xl bg-rose-50/40 border border-rose-100 hover:bg-rose-50 hover:border-rose-200 transition-all flex flex-col gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-rose-500 shrink-0">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-slate-900 truncate">{student.name}</p>
+                        <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5 truncate">{student.class}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-black text-slate-900 truncate">{student.name}</p>
-                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5 truncate">{student.class}</p>
+                    <div className="flex items-center justify-between pt-2 border-t border-rose-100">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Grade</p>
+                      <div className="text-right">
+                        <span className="text-2xl font-black text-rose-600 leading-none">{student.grade}</span>
+                        <span className="ml-2 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg"
+                          style={{ backgroundColor: student.grade <= 72 ? '#fef2f2' : '#fff7ed', color: student.grade <= 72 ? '#dc2626' : '#ea580c' }}>
+                          {student.grade <= 72 ? 'INC' : 'FAILED'}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-rose-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Grade</p>
-                    <div className="text-right">
-                      <span className="text-2xl font-black text-rose-600 leading-none">{student.grade}</span>
-                      <span className="ml-2 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg"
-                        style={{ backgroundColor: student.grade <= 72 ? '#fef2f2' : '#fff7ed', color: student.grade <= 72 ? '#dc2626' : '#ea580c' }}>
-                        {student.grade <= 72 ? 'INC' : 'FAILED'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </ScrollArea>
           ) : (
             <div className="py-24 text-center bg-emerald-50/50 rounded-[2.5rem] border-2 border-dashed border-emerald-100">
               <CheckCircle2 className="w-16 h-16 mx-auto mb-4 text-emerald-400" />

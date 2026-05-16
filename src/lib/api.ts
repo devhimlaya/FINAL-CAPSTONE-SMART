@@ -78,6 +78,7 @@ export interface Section {
   gradeLevel: string;
   schoolYear: string;
   adviser?: string;
+  enrollProId?: number | null;
   enrollments?: {
     student: Student;
   }[];
@@ -324,6 +325,9 @@ export const gradesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+
+  deleteClassAssignment: (id: string) =>
+    api.delete<{ message: string }>(`/grades/class-assignment/${id}`),
 };
 
 // Advisory API
@@ -470,26 +474,40 @@ export const advisoryApi = {
 
 // Registrar API Types
 export interface RegistrarDashboard {
-  totalStudents: number;
-  totalSections: number;
-  totalTeachers: number;
-  enrolledThisYear: number;
-  recentEnrollments: {
-    id: string;
-    name: string;
-    lrn: string;
-    section: string;
-    gradeLevel: string;
-    enrolledAt: string;
-  }[];
-  sectionStats: {
-    sectionId: string;
-    sectionName: string;
-    gradeLevel: string;
-    studentCount: number;
+  currentSchoolYear: string;
+  stats: {
+    totalStudents: number;
+    totalStudentsSource: "enrollpro-realtime" | "smart-db-fallback";
+    localTotalStudents: number;
+    totalSections: number;
     maleCount: number;
     femaleCount: number;
+    gradeStats: {
+      GRADE_7: number;
+      GRADE_8: number;
+      GRADE_9: number;
+      GRADE_10: number;
+    };
+  };
+  sections: {
+    id: string;
+    name: string;
+    gradeLevel: string;
+    studentCount: number;
+    adviser: string | null;
   }[];
+  sync: {
+    running: boolean;
+    lastSyncedAt: string | null;
+    minutesSinceLastSync: number | null;
+    isStale: boolean;
+    status: "fresh" | "stale" | "never";
+  };
+  dataCompleteness: {
+    missingBirthDate: number;
+    missingLrn: number;
+    totalIssues: number;
+  };
 }
 
 export interface SchoolYear {
@@ -510,16 +528,21 @@ export interface RegistrarStudent {
   address?: string;
   guardianName?: string;
   guardianContact?: string;
-  enrollments: {
-    id: string;
-    sectionId: string;
-    schoolYear: string;
-    status: string;
-    section: {
-      name: string;
-      gradeLevel: string;
-    };
-  }[];
+  gradeLevel: string;
+  sectionId: string;
+  sectionName: string;
+  schoolYear: string;
+  status: string;
+  adviser?: string | null;
+}
+
+export interface RegistrarSyncStatus {
+  running: boolean;
+  lastSyncedAt: string | null;
+  minutesSinceLastSync: number | null;
+  isStale: boolean;
+  status: "fresh" | "stale" | "never";
+  cycleCount?: number;
 }
 
 export interface SF8Data {
@@ -628,10 +651,25 @@ export interface SF10Data {
 export const registrarApi = {
   getDashboard: () => api.get<RegistrarDashboard>("/registrar/dashboard"),
 
+  getSyncStatus: () => api.get<RegistrarSyncStatus>("/registrar/sync/status"),
+
+  runSync: () => api.post<{ message: string }>("/registrar/sync/run", {}),
+
   getSchoolYears: () => api.get<{ schoolYears: string[] }>("/registrar/school-years"),
 
   getStudents: (params?: { schoolYear?: string; gradeLevel?: string; sectionId?: string; search?: string }) =>
-    api.get<{ students: RegistrarStudent[]; sections: Section[]; stats: any }>("/registrar/students", { params }),
+    api.get<{
+      students: RegistrarStudent[];
+      sections: Section[];
+      stats: {
+        total: number;
+        byGrade: Record<string, number>;
+        byGender: { male: number; female: number };
+        dataCompleteness: { missingBirthDate: number; missingLrn: number; totalIssues: number };
+      };
+      schoolYear: string;
+      source?: "smart-db-fallback";
+    }>("/registrar/students", { params }),
 
   getStudent: (studentId: string) =>
     api.get<{ student: RegistrarStudent }>(`/registrar/student/${studentId}`),
@@ -647,6 +685,47 @@ export const registrarApi = {
 
   getSections: (params?: { schoolYear?: string; gradeLevel?: string }) =>
     api.get<Section[]>("/registrar/sections", { params }),
+
+  // Applications (Phase 1)
+  getApplications: (params?: { status?: string; gradeLevel?: string; page?: number; limit?: number; search?: string }) =>
+    api.get("/registrar/applications", { params }),
+
+  // BOSY (Phase 1)
+  getBosyQueue: (params?: { page?: number; limit?: number; search?: string; gradeLevel?: string }) =>
+    api.get("/registrar/bosy/queue", { params }),
+
+  getBosyExpectedQueue: (params?: { priorSchoolYearId?: number; page?: number; limit?: number; search?: string; gradeLevel?: string }) =>
+    api.get("/registrar/bosy/expected-queue", { params }),
+
+  // Remedial (Phase 1)
+  getRemedialPending: (params?: { page?: number; limit?: number; search?: string; gradeLevel?: string }) =>
+    api.get("/registrar/remedial/pending", { params }),
+
+  // Section Roster (Phase 1)
+  getSectionRoster: (sectionId: number) =>
+    api.get(`/registrar/section-roster/${sectionId}`),
+
+  // EOSY (Phase 2)
+  getEosySections: () =>
+    api.get("/registrar/eosy/sections"),
+
+  getEosySectionRecords: (sectionId: number) =>
+    api.get(`/registrar/eosy/sections/${sectionId}/records`),
+
+  getEosySF5: (sectionId: number) =>
+    api.get(`/registrar/eosy/sections/${sectionId}/sf5`),
+
+  getEosySF6: (schoolYearId?: number) =>
+    api.get("/registrar/eosy/sf6", { params: schoolYearId ? { schoolYearId } : {} }),
+
+  // ATLAS (Phase 3)
+  getAtlasTeachingLoads: (atlasSchoolYearId?: number) =>
+    api.get("/registrar/atlas/teaching-loads", {
+      params: atlasSchoolYearId ? { atlasSchoolYearId } : {},
+    }),
+
+  getAtlasSubjectCoverage: () =>
+    api.get("/registrar/atlas/subject-coverage"),
 };
 
 // ============================================
@@ -765,6 +844,74 @@ export interface GradingConfig {
   isDepEdDefault: boolean;
 }
 
+export interface ExternalServiceHealth {
+  name: string;
+  url: string;
+  online: boolean;
+  httpStatus: number | null;
+  latencyMs: number;
+  status: "HEALTHY" | "DEGRADED" | "DOWN";
+  error?: string;
+}
+
+export interface SyncHistoryItem {
+  id: string;
+  source: string;
+  status: string;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  error?: string | null;
+  createdAt: string;
+}
+
+export interface AdminSystemHealth {
+  status: "HEALTHY" | "DEGRADED";
+  timestamp: string;
+  responseTimeMs: number;
+  local: {
+    uptimeSeconds: number;
+    memory: {
+      rss: number;
+      heapTotal: number;
+      heapUsed: number;
+      external: number;
+    };
+    database: {
+      online: boolean;
+      latencyMs: number;
+      error?: string;
+    };
+  };
+  external: {
+    enrollpro: ExternalServiceHealth;
+    atlas: ExternalServiceHealth;
+    aims: ExternalServiceHealth;
+  };
+  sync: {
+    coordinator: {
+      running: boolean;
+      cycleCount: number;
+      lastSyncAt: string | null;
+      config: {
+        intervalMinutes: number;
+        brandingEveryNCycles: number;
+        circuitBreakerFailureThreshold: number;
+        circuitBreakerCooldownMs: number;
+      };
+    };
+    circuitBreaker: {
+      open: boolean;
+      openedAt: string | null;
+      reason: string | null;
+      consecutiveCriticalFailures: number;
+      failureThreshold: number;
+      cooldownMs: number;
+    };
+    recentHistory: SyncHistoryItem[];
+  };
+}
+
 export const adminApi = {
   // Dashboard
   getDashboard: () => api.get<AdminDashboard>("/admin/dashboard"),
@@ -828,6 +975,15 @@ export const adminApi = {
 
   syncFromEnrollPro: () =>
     api.post<{ message: string; settings: SystemSettings }>("/admin/settings/sync-enrollpro", {}),
+
+  // System Health & Diagnostics
+  getSystemHealth: () => api.get<AdminSystemHealth>("/admin/system/health"),
+
+  getSyncHistory: (limit = 25) =>
+    api.get<{ history: SyncHistoryItem[]; count: number }>("/admin/system/sync-history", { params: { limit } }),
+
+  runSystemSync: () =>
+    api.post<{ message: string; result: any }>("/admin/system/sync/run", {}),
 
   // Grading Config
   getGradingConfig: () => api.get<{ configs: GradingConfig[] }>("/admin/grading-config"),

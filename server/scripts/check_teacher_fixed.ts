@@ -1,6 +1,6 @@
 
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import 'dotenv/config';
+import { prisma } from "../src/lib/prisma";
 
 async function main() {
   const teacherFirstName = "Ricardo";

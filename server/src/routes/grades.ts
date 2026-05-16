@@ -598,6 +598,73 @@ router.delete(
   }
 );
 
+// Delete a class assignment (only if it's archived/inactive)
+router.delete(
+  "/class-assignment/:id",
+  authenticateToken,
+  authorizeRoles("TEACHER"),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const assignmentId = req.params.id;
+
+      const teacher = await prisma.teacher.findUnique({
+        where: { userId: req.user?.id },
+      });
+
+      if (!teacher) {
+        res.status(404).json({ message: "Teacher profile not found" });
+        return;
+      }
+
+      const assignment = await prisma.classAssignment.findUnique({
+        where: { id: assignmentId },
+        include: {
+          subject: true,
+          section: true,
+        },
+      });
+
+      if (!assignment || assignment.teacherId !== teacher.id) {
+        res.status(403).json({ message: "Not authorized to delete this assignment" });
+        return;
+      }
+
+      // We only allow deleting archived/inactive assignments from the teacher's view
+      if (assignment.isActive) {
+        res.status(400).json({ message: "Only archived assignments can be deleted by teachers" });
+        return;
+      }
+
+      await prisma.classAssignment.delete({
+        where: { id: assignmentId },
+      });
+
+      const teacherUser = await prisma.user.findUnique({
+        where: { id: req.user?.id },
+        select: { id: true, firstName: true, lastName: true, role: true },
+      });
+
+      if (teacherUser) {
+        await createAuditLog(
+          AuditAction.DELETE,
+          teacherUser,
+          `Class Assignment Deleted: ${assignment.subject.name} - ${assignment.section.name}`,
+          "Class Records",
+          `Permanently deleted archived class assignment: ${assignment.subject.name} for section ${assignment.section.name} (${assignment.schoolYear})`,
+          req.ip || req.socket?.remoteAddress,
+          AuditSeverity.WARNING,
+          assignmentId
+        );
+      }
+
+      res.json({ message: "Assignment deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting class assignment:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  }
+);
+
 // Get summary/dashboard data for teacher
 router.get(
   "/dashboard",

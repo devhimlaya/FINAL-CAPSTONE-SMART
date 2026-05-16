@@ -10,6 +10,11 @@ import { prisma } from "../lib/prisma";
 import { createAuditLog } from "../lib/audit";
 import { addSseClient, removeSseClient, addSettingsSseClient, removeSettingsSseClient, broadcastSettingsUpdate } from "../lib/sseManager";
 import { syncEnrollProBranding } from "../lib/enrollproBrandingSync";
+import { getSyncStatus, runAtlasSync } from "../lib/atlasSync";
+import { getEnrollProSyncStatus, runEnrollProSync } from "../lib/enrollproSync";
+import { getRecentSyncHistory, runUnifiedSync } from "../lib/syncCoordinator";
+import { getSystemHealthSnapshot } from "../lib/systemHealth";
+import { getIntegrationV1ActiveSchoolYear, getIntegrationV1Faculty, getIntegrationV1LearnersPage } from "../lib/enrollproClient";
 
 const router = Router();
 
@@ -151,9 +156,21 @@ router.get("/dashboard", authenticateToken, requireAdmin, async (req: AuthReques
     });
 
     const totalUsers = userCounts.reduce((sum, item) => sum + item._count, 0);
-    const totalTeachers = userCounts.find((u) => u.role === "TEACHER")?._count || 0;
+    let totalTeachers = userCounts.find((u) => u.role === "TEACHER")?._count || 0;
     const totalAdmins = userCounts.find((u) => u.role === "ADMIN")?._count || 0;
     const totalRegistrars = userCounts.find((u) => u.role === "REGISTRAR")?._count || 0;
+
+    try {
+      const activeSy = await getIntegrationV1ActiveSchoolYear();
+      if (activeSy?.id) {
+        const faculty = await getIntegrationV1Faculty(activeSy.id);
+        if (Array.isArray(faculty) && faculty.length > 0) {
+          totalTeachers = faculty.length;
+        }
+      }
+    } catch (error: any) {
+      console.warn("[AdminDashboard] Failed to fetch live teacher count from EnrollPro, using local DB.", error.message);
+    }
 
     // Count active enrolled students from EnrollPro-synced enrollment records.
     // Prefer current configured school year, but fall back to latest synced year when needed.
@@ -173,26 +190,42 @@ router.get("/dashboard", authenticateToken, requireAdmin, async (req: AuthReques
     let totalStudents = 0;
     let studentCountSchoolYear: string | null = null;
 
-    if (configuredSchoolYear) {
-      totalStudents = await countDistinctEnrolledStudents(configuredSchoolYear);
-      studentCountSchoolYear = configuredSchoolYear;
-    }
-
-    if (totalStudents === 0) {
-      const latestEnrollment = await prisma.enrollment.findFirst({
-        where: { status: "ENROLLED" },
-        orderBy: { updatedAt: "desc" },
-        select: { schoolYear: true },
-      });
-
-      if (latestEnrollment?.schoolYear && latestEnrollment.schoolYear !== studentCountSchoolYear) {
-        totalStudents = await countDistinctEnrolledStudents(latestEnrollment.schoolYear);
-        studentCountSchoolYear = latestEnrollment.schoolYear;
+    // First attempt: Fetch real-time total directly from EnrollPro Integration API
+    try {
+      const activeSy = await getIntegrationV1ActiveSchoolYear();
+      if (activeSy && activeSy.id) {
+        // Fetch just 1 record to get the meta.total count efficiently
+        const page = await getIntegrationV1LearnersPage(activeSy.id, 1, 1);
+        totalStudents = page.meta?.total || 0;
+        studentCountSchoolYear = activeSy.yearLabel;
       }
+    } catch (error: any) {
+      console.warn("[AdminDashboard] Failed to fetch live student count from EnrollPro, falling back to local DB.", error.message);
     }
 
+    // Fallback: Use local DB if EnrollPro is unreachable or returned 0
     if (totalStudents === 0) {
-      totalStudents = await prisma.student.count();
+      if (configuredSchoolYear) {
+        totalStudents = await countDistinctEnrolledStudents(configuredSchoolYear);
+        studentCountSchoolYear = configuredSchoolYear;
+      }
+
+      if (totalStudents === 0) {
+        const latestEnrollment = await prisma.enrollment.findFirst({
+          where: { status: "ENROLLED" },
+          orderBy: { updatedAt: "desc" },
+          select: { schoolYear: true },
+        });
+
+        if (latestEnrollment?.schoolYear && latestEnrollment.schoolYear !== studentCountSchoolYear) {
+          totalStudents = await countDistinctEnrolledStudents(latestEnrollment.schoolYear);
+          studentCountSchoolYear = latestEnrollment.schoolYear;
+        }
+      }
+
+      if (totalStudents === 0) {
+        totalStudents = await prisma.student.count();
+      }
     }
 
     // Get today's login count from audit logs
@@ -268,6 +301,45 @@ router.get("/dashboard", authenticateToken, requireAdmin, async (req: AuthReques
   } catch (error) {
     console.error("Error fetching admin dashboard:", error);
     res.status(500).json({ message: "Failed to fetch dashboard data" });
+  }
+});
+
+// ============================================
+// SYSTEM HEALTH & SYNC DIAGNOSTICS ENDPOINTS
+// ============================================
+
+// Get complete local + external system health status.
+router.get("/system/health", authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const health = await getSystemHealthSnapshot();
+    res.json(health);
+  } catch (error) {
+    console.error("Error fetching system health:", error);
+    res.status(500).json({ message: "Failed to fetch system health" });
+  }
+});
+
+// Get persistent sync history for diagnostics UI.
+router.get("/system/sync-history", authenticateToken, requireAdmin, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const requestedLimit = Number(req.query.limit ?? 25);
+    const limit = Number.isFinite(requestedLimit) ? requestedLimit : 25;
+    const history = await getRecentSyncHistory(limit);
+    res.json({ history, count: history.length });
+  } catch (error) {
+    console.error("Error fetching sync history:", error);
+    res.status(500).json({ message: "Failed to fetch sync history" });
+  }
+});
+
+// Trigger full unified sync from admin diagnostics.
+router.post("/system/sync/run", authenticateToken, requireAdmin, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const result = await runUnifiedSync({ source: 'admin-system-health', forceBranding: false });
+    res.json({ message: "Unified sync complete", result });
+  } catch (error: any) {
+    console.error("Error running unified sync:", error);
+    res.status(500).json({ message: "Failed to run unified sync", error: error?.message ?? String(error) });
   }
 });
 
@@ -1496,8 +1568,14 @@ router.post("/class-assignments", authenticateToken, async (req: AuthRequest, re
 router.delete("/class-assignments/:id", authenticateToken, async (req: AuthRequest, res: Response): Promise<void> => {
   if (req.user?.role !== "ADMIN") { res.status(403).json({ message: "Forbidden" }); return; }
   try {
+    const assignmentId = String(req.params.id ?? '');
+    if (!assignmentId) {
+      res.status(400).json({ message: "Missing class assignment id" });
+      return;
+    }
+
     await prisma.classAssignment.update({
-      where: { id: req.params.id },
+      where: { id: assignmentId },
       data: {
         isActive: false,
         archivedAt: new Date(),

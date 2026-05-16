@@ -9,6 +9,12 @@ import {
   Users,
   ClipboardList,
   FolderOpen,
+  BookOpen,
+  CalendarCheck,
+  FlaskConical,
+  Layers,
+  GraduationCap,
+  BarChart3,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn, getAcronym } from "@/lib/utils";
@@ -24,11 +30,41 @@ interface UserData {
   email?: string;
 }
 
-const navigation = [
-  { name: "Dashboard", href: "/registrar", icon: LayoutDashboard },
-  { name: "Student Records", href: "/registrar/students", icon: Users },
-  { name: "Enrollment", href: "/registrar/enrollment", icon: ClipboardList },
-  { name: "School Forms", href: "/registrar/forms", icon: FolderOpen },
+const navigationGroups = [
+  {
+    title: "OPERATIONS",
+    items: [
+      { name: "Dashboard", href: "/registrar", icon: LayoutDashboard },
+    ]
+  },
+  {
+    title: "INTAKE & PREPARATION",
+    items: [
+      { name: "Applications", href: "/registrar/applications", icon: ClipboardList },
+      { name: "BOSY Queue", href: "/registrar/bosy", icon: CalendarCheck },
+    ]
+  },
+  {
+    title: "OFFICIAL ENROLLMENT",
+    items: [
+      { name: "Section Roster", href: "/registrar/roster", icon: Layers },
+    ]
+  },
+  {
+    title: "CLOSING OPERATIONS",
+    items: [
+      { name: "Remedial", href: "/registrar/remedial", icon: FlaskConical },
+      { name: "EOSY", href: "/registrar/eosy", icon: GraduationCap },
+    ]
+  },
+  {
+    title: "MANAGEMENT",
+    items: [
+      { name: "Student Records", href: "/registrar/students", icon: Users },
+      { name: "Teaching Load", href: "/registrar/teaching-load", icon: BarChart3 },
+      { name: "School Forms", href: "/registrar/forms", icon: FolderOpen },
+    ]
+  }
 ];
 
 export default function RegistrarLayout() {
@@ -41,7 +77,6 @@ export default function RegistrarLayout() {
     return saved === 'true';
   });
   const { colors, logoUrl, schoolName } = useTheme();
-  const acronym = getAcronym(schoolName);
 
   useEffect(() => {
     const userData = sessionStorage.getItem("user");
@@ -74,11 +109,14 @@ export default function RegistrarLayout() {
   };
 
   const getCurrentPageTitle = () => {
-    const currentNav = navigation.find(nav => 
-      location.pathname === nav.href || 
-      (nav.href !== "/registrar" && location.pathname.startsWith(nav.href))
-    );
-    return currentNav?.name || "Dashboard";
+    for (const group of navigationGroups) {
+      const currentNav = group.items.find(nav => 
+        location.pathname === nav.href || 
+        (nav.href !== "/registrar" && location.pathname.startsWith(nav.href))
+      );
+      if (currentNav) return currentNav.name;
+    }
+    return "Dashboard";
   };
 
   if (!user) return null;
@@ -101,20 +139,19 @@ export default function RegistrarLayout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 bg-white border-r border-slate-200 transition-[width,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col shadow-sm will-change-[width,transform]",
+          "fixed inset-y-0 left-0 z-50 bg-[#fafafa] border-r border-slate-200 transition-[width,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] flex flex-col shadow-sm will-change-[width,transform]",
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
           sidebarCollapsed ? "lg:w-[70px] w-[280px]" : "w-[280px]"
         )}
+        style={{ fontFamily: "'Instrument Sans', 'Geist Variable', sans-serif" }}
       >
         {/* Logo Header */}
-        <div className="h-16 flex items-center border-b border-slate-100 overflow-hidden px-4">
+        <div className="h-24 flex items-center overflow-hidden px-6">
           <div className="flex items-center w-full min-w-[240px]">
-            <div className="w-10 h-10 flex flex-shrink-0 items-center justify-center">
+            <div className="w-12 h-12 flex flex-shrink-0 items-center justify-center">
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-transform duration-200 ease-out"
+                className="w-12 h-12 rounded-lg bg-white border border-slate-100 shadow-sm flex items-center justify-center overflow-hidden transition-transform duration-200 ease-out p-1"
                 style={{
-                  backgroundColor: logoUrl ? 'white' : colors.primary,
-                  boxShadow: `0 4px 10px ${colors.primary}20`,
                   transform: sidebarCollapsed ? 'scale(0.9)' : 'scale(1)'
                 }}
               >
@@ -122,10 +159,10 @@ export default function RegistrarLayout() {
                   <img
                     src={logoUrl.startsWith("http") ? logoUrl : `${SERVER_URL}${logoUrl}`}
                     alt="School Logo"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
                 ) : (
-                  <FileText className="w-5 h-5 text-white" />
+                  <FileText className="w-6 h-6 text-[var(--theme-primary)]" />
                 )}
               </div>
             </div>
@@ -133,11 +170,13 @@ export default function RegistrarLayout() {
               "ml-3 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] origin-left flex-shrink-0",
               sidebarCollapsed ? "opacity-0 scale-90 -translate-x-4 pointer-events-none" : "opacity-100 scale-100 translate-x-0"
             )}>
-              <span className="font-bold text-slate-800 text-base tracking-tight whitespace-nowrap uppercase">{acronym}</span>
+              <span className="font-bold text-sm leading-tight tracking-tight uppercase block max-w-[160px] text-[var(--theme-primary)]">
+                {schoolName}
+              </span>
             </div>
           </div>
           <button
-            className="lg:hidden ml-auto p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors"
+            className="lg:hidden ml-auto p-2 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors"
             onClick={() => setSidebarOpen(false)}
           >
             <X className="w-5 h-5" />
@@ -145,49 +184,60 @@ export default function RegistrarLayout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto py-4 px-3 custom-scrollbar overflow-x-hidden">
-          <div className="space-y-1">
-            {navigation.map((item) => {
-              const isActive = location.pathname === item.href || 
-                (item.href !== "/registrar" && location.pathname.startsWith(item.href));
-              return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={cn(
-                    "flex items-center rounded-xl text-sm font-medium transition-colors duration-200 mb-0.5 group overflow-hidden px-2 py-2.5",
-                    isActive ? "text-white shadow-md shadow-slate-200" : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                  )}
-                  style={{
-                    backgroundColor: isActive ? colors.primary : undefined,
-                  }}
-                  onClick={() => setSidebarOpen(false)}
-                  title={sidebarCollapsed ? item.name : undefined}
-                >
-                  <div className="flex items-center w-full min-w-[240px]">
-                    <div className="w-6 h-6 flex flex-shrink-0 items-center justify-center">
-                      <item.icon className={cn(
-                        "w-5 h-5 transition-colors duration-200",
-                        isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600"
-                      )} />
-                    </div>
-                    <span className={cn(
-                      "ml-4 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] origin-left whitespace-nowrap flex-shrink-0",
-                      sidebarCollapsed ? "opacity-0 scale-90 -translate-x-4 pointer-events-none" : "opacity-100 scale-100 translate-x-0"
-                    )}>{item.name}</span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+        <nav className="flex-1 overflow-y-auto py-2 px-3 custom-scrollbar overflow-x-hidden">
+          {navigationGroups.map((group) => (
+            <div key={group.title} className="mb-5 first:mt-2">
+              {!sidebarCollapsed && (
+                <span className="px-4 mb-1 text-[0.625rem] font-bold text-[#0F1729]/60 uppercase tracking-normal block whitespace-nowrap">
+                  {group.title}
+                </span>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const isActive = location.pathname === item.href || 
+                    (item.href !== "/registrar" && location.pathname.startsWith(item.href));
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={cn(
+                        "flex items-center rounded-full text-[14px] font-medium transition-all duration-200 group overflow-hidden px-4 py-1.5",
+                        isActive 
+                          ? "text-white shadow-sm" 
+                          : "text-[#0F1729] hover:bg-white/80"
+                      )}
+                      style={{
+                        backgroundColor: isActive ? 'var(--theme-primary)' : 'transparent',
+                      }}
+                      onClick={() => setSidebarOpen(false)}
+                      title={sidebarCollapsed ? item.name : undefined}
+                    >
+                      <div className="flex items-center w-full min-w-[240px]">
+                        <div className="w-6 h-6 flex flex-shrink-0 items-center justify-center">
+                          <item.icon className={cn(
+                            "w-5 h-5 transition-colors duration-200",
+                            isActive ? "text-white" : "text-[#0F1729]/70 group-hover:text-[#0F1729]"
+                          )} strokeWidth={2.2} />
+                        </div>
+                        <span className={cn(
+                          "ml-4 transition-[opacity,transform] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)] origin-left whitespace-nowrap flex-shrink-0",
+                          sidebarCollapsed ? "opacity-0 scale-90 -translate-x-4 pointer-events-none" : "opacity-100 scale-100 translate-x-0"
+                        )}>{item.name}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* User Profile at Bottom */}
-        <div className="p-3 border-t border-slate-100 bg-slate-50/50 overflow-hidden">
+        <div className="p-4 border-t border-slate-100 bg-white/20 overflow-hidden">
           <div className="flex items-center w-full min-w-[240px] px-1 py-1">
             <div className="w-9 h-9 flex flex-shrink-0 items-center justify-center">
               <Avatar className="w-9 h-9 border border-white shadow-sm transition-transform duration-200" style={{ transform: sidebarCollapsed ? 'scale(0.9)' : 'scale(1)' }}>
-                <AvatarFallback className="bg-white text-slate-700 font-semibold text-xs">
+                <AvatarFallback className="bg-slate-100 text-slate-700 font-bold text-xs uppercase">
                   {user.firstName ? user.firstName.charAt(0).toUpperCase() : user.username.charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -197,8 +247,8 @@ export default function RegistrarLayout() {
               sidebarCollapsed ? "opacity-0 scale-90 -translate-x-4 pointer-events-none" : "opacity-100 scale-100 translate-x-0"
             )}>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-slate-900 truncate">{userDisplayName}</p>
-                <p className="text-[10px] text-slate-500 truncate">{userEmail}</p>
+                <p className="text-xs font-bold text-[#0F1729] truncate leading-none mb-1">{userDisplayName}</p>
+                <p className="text-[10px] font-bold text-[#0F1729]/50 truncate uppercase tracking-tight">School Registrar</p>
               </div>
               <button
                 onClick={handleLogout}

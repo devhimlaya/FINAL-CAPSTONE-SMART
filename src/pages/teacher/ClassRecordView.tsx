@@ -1,43 +1,11 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
-  ArrowLeft,
-  Plus,
-  Minus,
   AlertCircle,
   CheckCircle,
-  Award,
   Loader2,
-  TrendingUp,
-  TrendingDown,
-  Target,
-  FileSpreadsheet,
-  Upload,
   X,
-  Download,
 } from "lucide-react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   gradesApi,
   SERVER_URL,
@@ -45,22 +13,32 @@ import {
   type ClassRecord,
   type ScoreItem,
 } from "@/lib/api";
-import { useTheme } from "@/contexts/ThemeContext";
+import { ClassRecordTable } from "./components/ClassRecordTable";
+import { ClassRecordMobileList } from "./components/ClassRecordMobileList";
+import { GradeEditModal } from "./components/GradeEditModal";
+import { AssessmentHeader } from "./components/AssessmentHeader";
+import { ClassRecordHero } from "./components/ClassRecordHero";
+import { ClassRecordStats } from "./components/ClassRecordStats";
+import { EcrGenerationDialog } from "./components/EcrGenerationDialog";
+import { executeHpsUpdate, executeRemoveTask, executeScoreUpdate } from "./components/classRecordActions";
+import { HGDescriptorPanel } from "./components/HGDescriptorPanel";
+import {
+  getDisplayFinalGrade as computeDisplayFinalGrade,
+  getMobileDraftKey,
+  getScoreFromGrade as computeScoreFromGrade,
+} from "./components/classRecordMobileUtils";
 
-const gradeLevelLabels: Record<string, string> = {
-  GRADE_7: "Grade 7",
-  GRADE_8: "Grade 8",
-  GRADE_9: "Grade 9",
-  GRADE_10: "Grade 10",
-};
-
-const quarters = ["Q1", "Q2", "Q3", "Q4"] as const;
 const HG_DESCRIPTORS = [
   'No Improvement',
   'Needs Improvement',
   'Developing',
   'Sufficiently Developed',
 ] as const;
+
+interface AssessmentTaskMeta {
+  description: string;
+  date: string;
+}
 
 function getGradeColor(grade: number | null): string {
   if (grade === null) return "text-slate-300";
@@ -71,366 +49,8 @@ function getGradeColor(grade: number | null): string {
   return "text-rose-600";
 }
 
-function transmuteGrade(initialGrade: number): number {
-  const transmutationTable: [number, number, number][] = [
-    [100, 100, 100],
-    [98.4, 99.99, 99],
-    [96.8, 98.39, 98],
-    [95.2, 96.79, 97],
-    [93.6, 95.19, 96],
-    [92, 93.59, 95],
-    [90.4, 91.99, 94],
-    [88.8, 90.39, 93],
-    [87.2, 88.79, 92],
-    [85.6, 87.19, 91],
-    [84, 85.59, 90],
-    [82.4, 83.99, 89],
-    [80.8, 82.39, 88],
-    [79.2, 80.79, 87],
-    [77.6, 79.19, 86],
-    [76, 77.59, 85],
-    [74.4, 75.99, 84],
-    [72.8, 74.39, 83],
-    [71.2, 72.79, 82],
-    [69.6, 71.19, 81],
-    [68, 69.59, 80],
-    [66.4, 67.99, 79],
-    [64.8, 66.39, 78],
-    [63.2, 64.79, 77],
-    [61.6, 63.19, 76],
-    [60, 61.59, 75],
-    [56, 59.99, 74],
-    [52, 55.99, 73],
-    [48, 51.99, 72],
-    [44, 47.99, 71],
-    [40, 43.99, 70],
-    [36, 39.99, 69],
-    [32, 35.99, 68],
-    [28, 31.99, 67],
-    [24, 27.99, 66],
-    [20, 23.99, 65],
-    [16, 19.99, 64],
-    [12, 15.99, 63],
-    [8, 11.99, 62],
-    [4, 7.99, 61],
-    [0, 3.99, 60],
-  ];
-
-  for (const [min, max, grade] of transmutationTable) {
-    if (initialGrade >= min && initialGrade <= max) {
-      return grade;
-    }
-  }
-
-  return Math.round(Math.max(60, Math.min(100, initialGrade)));
-}
-
-// ─── Optimized Ledger Row Component ───────────────────────────────────────
-
-interface LedgerRowProps {
-  record: ClassRecord | null;
-  idx: number;
-  rowIndex: number;
-  isHps?: boolean;
-  hpsStickyTop?: number;
-  hpsData?: { wwScores: ScoreItem[]; ptScores: ScoreItem[]; qaMax: number };
-  selectedQuarter: string;
-  wwCount: number;
-  ptCount: number;
-  weights: { ww: number; pt: number; qa: number };
-  onHpsUpdate: (cat: 'WW' | 'PT' | 'QA', idx: number, val: number) => void;
-  onScoreCommit: (inputEl: HTMLInputElement, sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => boolean;
-  onCellFocus: (cat: 'WW' | 'PT' | 'QA', idx: number) => void;
-  isCellInvalid: (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => boolean;
-}
-
-interface AssessmentTaskMeta {
-  description: string;
-  date: string;
-}
-
-const LedgerRow = React.memo(({ 
-  record, idx, rowIndex, isHps = false, hpsStickyTop, hpsData, selectedQuarter, wwCount, ptCount, weights, onHpsUpdate, onScoreCommit, onCellFocus, isCellInvalid
-}: LedgerRowProps) => {
-  const studentId = record?.student.id || "HPS";
-  const grade = record?.grades?.find(g => g.quarter === selectedQuarter);
-  
-  const wwScores = isHps
-    ? (hpsData?.wwScores || [])
-    : ((grade?.writtenWorkScores || []) as ScoreItem[]);
-  const ptScores = isHps
-    ? (hpsData?.ptScores || [])
-    : ((grade?.perfTaskScores || []) as ScoreItem[]);
-
-  // Helper for safe number display
-  const formatNum = (val: number | undefined | null, fallback = "—") => {
-    if (val === undefined || val === null) return fallback;
-    return Number(val).toFixed(1);
-  };
-
-  // Client-side calculation fallbacks for instant feedback and robustness
-  const calcTotal = (scores: ScoreItem[]) => scores.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0);
-  const calcMax = (scores: ScoreItem[]) => scores.reduce((acc, curr) => acc + (Number(curr.maxScore) || 0), 0);
-  const calcPS = (total: number, max: number) => max > 0 ? (total / max) * 100 : 0;
-
-  const wwTotal = calcTotal(wwScores);
-  const wwMaxTotal = calcMax(wwScores);
-  const displayWWPS = grade?.writtenWorkPS ?? (wwMaxTotal > 0 ? calcPS(wwTotal, wwMaxTotal) : null);
-  const displayWWWS = displayWWPS !== null ? (displayWWPS * (weights.ww / 100)) : null;
-
-  const ptTotal = calcTotal(ptScores);
-  const ptMaxTotal = calcMax(ptScores);
-  const displayPTPS = grade?.perfTaskPS ?? (ptMaxTotal > 0 ? calcPS(ptTotal, ptMaxTotal) : null);
-  const displayPTWS = displayPTPS !== null ? (displayPTPS * (weights.pt / 100)) : null;
-
-  const qaScore = Number(grade?.quarterlyAssessScore) || 0;
-  const qaMax = isHps
-    ? (hpsData?.qaMax ?? 100)
-    : (Number(grade?.quarterlyAssessMax) || 100);
-  const displayQAPS = grade?.quarterlyAssessPS ?? (qaMax > 0 ? calcPS(qaScore, qaMax) : null);
-  const displayQAWS = displayQAPS !== null ? (displayQAPS * (weights.qa / 100)) : null;
-
-  const computedInitialGrade =
-    displayWWWS !== null && displayPTWS !== null && displayQAWS !== null
-      ? displayWWWS + displayPTWS + displayQAWS
-      : null;
-  const displayInitialGrade = grade?.initialGrade ?? computedInitialGrade;
-  const displayQuarterlyGrade =
-    grade?.quarterlyGrade ??
-    (displayInitialGrade !== null ? transmuteGrade(displayInitialGrade) : null);
-
-  const cellClass = "text-center text-[10px] font-bold border-r border-slate-100 p-0 h-10";
-  const inputClass = "w-full h-full bg-transparent text-center focus:bg-white focus:ring-1 focus:ring-inset focus:ring-indigo-500/30 outline-none transition-all px-1 font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
-
-  return (
-    <TableRow
-      className={isHps ? 'bg-slate-800 text-white shadow-lg h-10 hover:bg-slate-800 transition-none' : 'hover:bg-indigo-50/10 transition-all group h-10'}
-    >
-      <TableCell
-        className={`text-center font-bold text-[9px] border-r border-b border-slate-100 ${isHps ? 'text-indigo-300 sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : 'text-slate-300'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "MAX" : idx + 1}
-      </TableCell>
-      <TableCell
-        className={`font-mono text-[9px] font-medium border-r border-b border-slate-100 px-3 truncate ${isHps ? 'text-slate-500 sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : 'text-slate-400'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "—" : record?.student.lrn}
-      </TableCell>
-      <TableCell
-        className={`border-r border-b border-slate-200 px-3 min-w-[200px] ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        <p className={`font-bold text-[10px] tracking-tight uppercase truncate ${isHps ? 'text-indigo-300' : 'text-slate-700'}`}>
-          {isHps ? "HIGHEST POSSIBLE SCORE" : `${record?.student.lastName}, ${record?.student.firstName}`}
-        </p>
-      </TableCell>
-      
-      {/* WW Individual */}
-      {Array.from({ length: wwCount }).map((_, i) => (
-        <TableCell
-          key={`ww-${i}`}
-          className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
-          style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-        >
-          {(() => {
-            const invalid = !isHps && isCellInvalid(studentId, 'WW', i);
-            return (
-          <input 
-            type="number"
-            inputMode="decimal"
-            defaultValue={isHps ? (wwScores[i]?.maxScore || 0) : (wwScores[i]?.score || '')}
-            placeholder="0"
-            className={`${inputClass} ${isHps ? 'text-indigo-300 font-black' : 'text-slate-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
-            onFocus={(e) => {
-              onCellFocus('WW', i);
-              e.currentTarget.select();
-              e.currentTarget.dataset.prev = e.currentTarget.value;
-            }}
-            onBlur={(e) => {
-              if (isHps) {
-                const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
-                onHpsUpdate('WW', i, val);
-              } else {
-                onScoreCommit(e.currentTarget, studentId, 'WW', i);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter' || isHps) return;
-              e.preventDefault();
-              const didSave = onScoreCommit(e.currentTarget, studentId, 'WW', i);
-              if (!didSave) return;
-              const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="WW"][data-col="${i}"]`);
-              nextInput?.focus();
-            }}
-            data-row-index={isHps ? -1 : rowIndex}
-            data-cat="WW"
-            data-col={i}
-          />
-            );
-          })()}
-        </TableCell>
-      ))}
-      <TableCell
-        className={`text-center text-[10px] font-black border-r border-b border-slate-100 ${isHps ? 'bg-slate-700 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-slate-50/50 text-slate-500'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? wwMaxTotal : wwTotal}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-indigo-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-indigo-50/5'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "100.0" : formatNum(displayWWPS)}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-indigo-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-indigo-50/10'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? weights.ww.toFixed(1) : formatNum(displayWWWS)}
-      </TableCell>
-      
-      {/* PT Individual */}
-      {Array.from({ length: ptCount }).map((_, i) => (
-        <TableCell
-          key={`pt-${i}`}
-          className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
-          style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-        >
-          {(() => {
-            const invalid = !isHps && isCellInvalid(studentId, 'PT', i);
-            return (
-          <input 
-            type="number"
-            inputMode="decimal"
-            defaultValue={isHps ? (ptScores[i]?.maxScore || 0) : (ptScores[i]?.score || '')}
-            placeholder="0"
-            className={`${inputClass} ${isHps ? 'text-purple-300 font-black' : 'text-slate-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
-            onFocus={(e) => {
-              onCellFocus('PT', i);
-              e.currentTarget.select();
-              e.currentTarget.dataset.prev = e.currentTarget.value;
-            }}
-            onBlur={(e) => {
-              if (isHps) {
-                const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
-                onHpsUpdate('PT', i, val);
-              } else {
-                onScoreCommit(e.currentTarget, studentId, 'PT', i);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter' || isHps) return;
-              e.preventDefault();
-              const didSave = onScoreCommit(e.currentTarget, studentId, 'PT', i);
-              if (!didSave) return;
-              const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="PT"][data-col="${i}"]`);
-              nextInput?.focus();
-            }}
-            data-row-index={isHps ? -1 : rowIndex}
-            data-cat="PT"
-            data-col={i}
-          />
-            );
-          })()}
-        </TableCell>
-      ))}
-      <TableCell
-        className={`text-center text-[10px] font-black border-r border-b border-slate-100 ${isHps ? 'bg-slate-700 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-slate-50/50 text-slate-500'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? ptMaxTotal : ptTotal}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-purple-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-purple-50/5'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "100.0" : formatNum(displayPTPS)}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-purple-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-purple-50/10'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? weights.pt.toFixed(1) : formatNum(displayPTWS)}
-      </TableCell>
-      
-      {/* QA */}
-      <TableCell
-        className={`${cellClass} border-b border-slate-100 ${isHps ? 'sticky z-30 bg-slate-800 border-y border-slate-700 bg-clip-padding' : ''}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {(() => {
-          const invalid = !isHps && isCellInvalid(studentId, 'QA', 0);
-          return (
-        <input 
-          type="number"
-          inputMode="decimal"
-          defaultValue={isHps ? qaMax : (grade?.quarterlyAssessScore || '')}
-          placeholder="0"
-          className={`${inputClass} ${isHps ? 'text-amber-300 font-black' : 'text-amber-600'} ${invalid ? 'ring-1 ring-inset ring-rose-500 bg-rose-50/40 text-rose-700' : ''}`}
-          onFocus={(e) => {
-            onCellFocus('QA', 0);
-            e.currentTarget.select();
-            e.currentTarget.dataset.prev = e.currentTarget.value;
-          }}
-          onBlur={(e) => {
-            if (isHps) {
-              const val = e.currentTarget.value === '' ? 0 : Number(e.currentTarget.value);
-              onHpsUpdate('QA', 0, val);
-            } else {
-              onScoreCommit(e.currentTarget, studentId, 'QA', 0);
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' || isHps) return;
-            e.preventDefault();
-            const didSave = onScoreCommit(e.currentTarget, studentId, 'QA', 0);
-            if (!didSave) return;
-            const nextInput = document.querySelector<HTMLInputElement>(`[data-row-index="${rowIndex + 1}"][data-cat="QA"][data-col="0"]`);
-            nextInput?.focus();
-          }}
-          data-row-index={isHps ? -1 : rowIndex}
-          data-cat="QA"
-          data-col={0}
-        />
-          );
-        })()}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-amber-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-amber-50/10'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "100.0" : formatNum(displayQAPS)}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-[10px] text-amber-700 border-r border-b border-slate-200 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-amber-50/20'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? weights.qa.toFixed(1) : formatNum(displayQAWS)}
-      </TableCell>
-      
-      {/* Summary */}
-      <TableCell
-        className={`text-center font-black text-[10px] text-emerald-600 border-r border-b border-slate-100 ${isHps ? 'bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-emerald-50/10'}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "100.0" : formatNum(displayInitialGrade)}
-      </TableCell>
-      <TableCell
-        className={`text-center font-black text-xs border-b border-slate-100 ${isHps ? 'text-white bg-slate-800 sticky z-20 border-y border-slate-700 bg-clip-padding' : 'bg-emerald-100/30'} ${!isHps ? getGradeColor(displayQuarterlyGrade) : ''}`}
-        style={isHps ? { top: hpsStickyTop ?? 0 } : undefined}
-      >
-        {isHps ? "100" : (displayQuarterlyGrade ?? <span className="text-slate-300">—</span>)}
-      </TableCell>
-    </TableRow>
-  );
-});
-
-LedgerRow.displayName = "LedgerRow";
 
 export default function ClassRecordView() {
-  const { colors } = useTheme();
   const { classAssignmentId } = useParams();
   const [classAssignment, setClassAssignment] = useState<ClassAssignment | null>(null);
   const [classRecord, setClassRecord] = useState<ClassRecord[]>([]);
@@ -455,6 +75,10 @@ export default function ClassRecordView() {
   const [metaEditorTarget, setMetaEditorTarget] = useState<{ category: 'WW' | 'PT' | 'QA'; index: number } | null>(null);
   const [metaEditorDraft, setMetaEditorDraft] = useState<{ description: string; date: string }>({ description: '', date: '' });
   const [savingMeta, setSavingMeta] = useState(false);
+  const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
+  const [mobileEditorStudentId, setMobileEditorStudentId] = useState<string | null>(null);
+  const [mobileEditorTab, setMobileEditorTab] = useState<'WW' | 'PT' | 'QA' | 'HG'>('WW');
+  const [mobileScoreDraft, setMobileScoreDraft] = useState<Record<string, string>>({});
 
   const [separateByGender, setSeparateByGender] = useState(false);
   const ecrFileInputRef = useRef<HTMLInputElement>(null);
@@ -463,6 +87,8 @@ export default function ClassRecordView() {
   const [ledgerHeaderHeight, setLedgerHeaderHeight] = useState(0);
   const assessmentDetailsRef = useRef<HTMLDivElement | null>(null);
   const [assessmentDetailsHeight, setAssessmentDetailsHeight] = useState(0);
+  const metaEditorRef = useRef<HTMLDivElement | null>(null);
+  const [metaEditorHeight, setMetaEditorHeight] = useState(0);
 
   // Dynamic Column Counts
   const wwCount = useMemo(() => {
@@ -675,6 +301,70 @@ export default function ClassRecordView() {
     }
   };
 
+  const applyColumnMetaFromMobile = async (
+    category: 'WW' | 'PT' | 'QA',
+    index: number,
+    description: string,
+    date: string,
+  ) => {
+    if (!classAssignmentId) return;
+
+    const nextWwMeta = [...wwMeta];
+    const nextPtMeta = [...ptMeta];
+    const nextQaMeta = { ...qaMeta };
+
+    if (category === 'WW') {
+      while (nextWwMeta.length <= index) {
+        nextWwMeta.push({ description: `WW ${nextWwMeta.length + 1}`, date: '' });
+      }
+      nextWwMeta[index] = {
+        description: description || `WW ${index + 1}`,
+        date: date || '',
+      };
+    } else if (category === 'PT') {
+      while (nextPtMeta.length <= index) {
+        nextPtMeta.push({ description: `PT ${nextPtMeta.length + 1}`, date: '' });
+      }
+      nextPtMeta[index] = {
+        description: description || `PT ${index + 1}`,
+        date: date || '',
+      };
+    } else {
+      nextQaMeta.description = description;
+      nextQaMeta.date = date;
+    }
+
+    setWwMeta(nextWwMeta);
+    setPtMeta(nextPtMeta);
+    setQaMeta(nextQaMeta);
+
+    try {
+      const updatePromises = classRecord.map((record) => {
+        const grade = record.grades.find((g) => g.quarter === selectedQuarter);
+        const wwScores = applyMetaToScores([...(grade?.writtenWorkScores || []) as ScoreItem[]], 'WW', wwCount, nextWwMeta);
+        const ptScores = applyMetaToScores([...(grade?.perfTaskScores || []) as ScoreItem[]], 'PT', ptCount, nextPtMeta);
+
+        return gradesApi.saveGrade({
+          studentId: record.student.id,
+          classAssignmentId,
+          quarter: selectedQuarter,
+          writtenWorkScores: wwScores,
+          perfTaskScores: ptScores,
+          qaDescription: nextQaMeta.description || undefined,
+          qaDate: nextQaMeta.date || undefined,
+        });
+      });
+
+      await Promise.all(updatePromises);
+      setSuccess('Assessment metadata synced for the class');
+      fetchClassRecord(true);
+    } catch (err: any) {
+      console.error('Failed to sync mobile column metadata:', err);
+      setError(err?.response?.data?.message || 'Failed to sync assessment metadata');
+      fetchClassRecord(true);
+    }
+  };
+
   const isCellInvalid = (sid: string, cat: 'WW' | 'PT' | 'QA', idx: number) => Boolean(invalidCells[getCellKey(sid, cat, idx)]);
 
   const commitScoreInput = (
@@ -771,6 +461,28 @@ export default function ClassRecordView() {
     };
   }, [showAssessmentDetails, wwCount, ptCount]);
 
+  useEffect(() => {
+    if (!metaEditorTarget) {
+      setMetaEditorHeight(0);
+      return;
+    }
+    const node = metaEditorRef.current;
+    if (!node) return;
+    const update = () => setMetaEditorHeight(node.offsetHeight || 0);
+    update();
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(update);
+      observer.observe(node);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [metaEditorTarget]);
+
 
   const fetchClassRecord = async (silent = false) => {
     if (!classAssignmentId) return;
@@ -832,101 +544,23 @@ export default function ClassRecordView() {
     index: number, 
     newValue: number
   ) => {
-    if (!classAssignmentId) return;
-
-    const key = getCellKey(studentId, category, index);
-    const maxAllowed = getMaxForCell(category, index);
-    if (newValue < 0) {
-      setInvalidCells((prev) => ({ ...prev, [key]: 'Score cannot be negative.' }));
-      setError('Score cannot be negative.');
-      return;
-    }
-    if (newValue > maxAllowed) {
-      setInvalidCells((prev) => ({ ...prev, [key]: `Score cannot exceed ${maxAllowed}.` }));
-      setError(`${category} ${category === 'QA' ? '' : index + 1} score cannot exceed MAX (${maxAllowed}).`.trim());
-      return;
-    }
-    setInvalidCells((prev) => {
-      if (!prev[key]) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
+    await executeScoreUpdate({
+      classAssignmentId,
+      classRecord,
+      selectedQuarter,
+      studentId,
+      category,
+      index,
+      newValue,
+      qaMeta,
+      getCellKey,
+      getMaxForCell,
+      applyMetaToScores,
+      setClassRecord,
+      setInvalidCells,
+      setError,
+      fetchClassRecord,
     });
-    
-    // 1. Optimistic Local Update
-    setClassRecord(prev => prev.map(record => {
-      if (record.student.id !== studentId) return record;
-
-      const newRecord = { ...record, grades: [...record.grades] };
-      const gradeIdx = newRecord.grades.findIndex(g => g.quarter === selectedQuarter);
-      
-      let targetGrade = gradeIdx > -1 ? { ...newRecord.grades[gradeIdx] } : {
-        studentId,
-        classAssignmentId,
-        quarter: selectedQuarter,
-        writtenWorkScores: [],
-        perfTaskScores: [],
-        quarterlyAssessScore: 0,
-        quarterlyAssessMax: 100
-      } as any;
-
-      if (category === 'WW') {
-        const scores = [...(targetGrade.writtenWorkScores as any[] || [])];
-        while (scores.length <= index) scores.push({ name: `WW ${scores.length+1}`, score: 0, maxScore: 10 });
-        scores[index] = { ...scores[index], score: newValue };
-        targetGrade.writtenWorkScores = applyMetaToScores(scores as ScoreItem[], 'WW', index + 1);
-      } else if (category === 'PT') {
-        const scores = [...(targetGrade.perfTaskScores as any[] || [])];
-        while (scores.length <= index) scores.push({ name: `PT ${scores.length+1}`, score: 0, maxScore: 10 });
-        scores[index] = { ...scores[index], score: newValue };
-        targetGrade.perfTaskScores = applyMetaToScores(scores as ScoreItem[], 'PT', index + 1);
-      } else if (category === 'QA') {
-        targetGrade.quarterlyAssessScore = newValue;
-        targetGrade.qaDescription = qaMeta.description || null;
-        targetGrade.qaDate = qaMeta.date || null;
-      }
-
-      if (gradeIdx > -1) newRecord.grades[gradeIdx] = targetGrade;
-      else newRecord.grades.push(targetGrade);
-
-      return newRecord;
-    }));
-
-    try {
-      const record = classRecord.find(r => r.student.id === studentId);
-      const grade = record?.grades.find(g => g.quarter === selectedQuarter);
-      
-      const wwScores = [...((grade?.writtenWorkScores || []) as ScoreItem[])];
-      const ptScores = [...((grade?.perfTaskScores || []) as ScoreItem[])];
-      
-      if (category === 'WW') {
-        while (wwScores.length <= index) wwScores.push({ name: `WW ${wwScores.length + 1}`, score: 0, maxScore: 10 });
-        wwScores[index].score = newValue;
-      } else if (category === 'PT') {
-        while (ptScores.length <= index) ptScores.push({ name: `PT ${ptScores.length + 1}`, score: 0, maxScore: 10 });
-        ptScores[index].score = newValue;
-      }
-
-      const wwScoresWithMeta = applyMetaToScores(wwScores, 'WW', index + 1);
-      const ptScoresWithMeta = applyMetaToScores(ptScores, 'PT', index + 1);
-
-      await gradesApi.saveGrade({
-        studentId,
-        classAssignmentId,
-        quarter: selectedQuarter,
-        writtenWorkScores: category === 'WW' ? wwScoresWithMeta : undefined,
-        perfTaskScores: category === 'PT' ? ptScoresWithMeta : undefined,
-        quarterlyAssessScore: category === 'QA' ? newValue : undefined,
-        qaDescription: qaMeta.description || undefined,
-        qaDate: qaMeta.date || undefined,
-      });
-
-      fetchClassRecord(true);
-    } catch (err: any) {
-      console.error("Failed to update score:", err);
-      setError(err?.response?.data?.message || "Failed to save grade. Please retry.");
-      fetchClassRecord(true);
-    }
   };
 
   const handleHpsUpdate = async (
@@ -934,80 +568,19 @@ export default function ClassRecordView() {
     index: number, 
     newMax: number
   ) => {
-    if (!classAssignmentId || classRecord.length === 0) return;
-    
-    // 1. Optimistic Local Update
-    setClassRecord(prev => prev.map(record => {
-      const newRecord = { ...record, grades: [...record.grades] };
-      const gradeIdx = newRecord.grades.findIndex(g => g.quarter === selectedQuarter);
-      
-      let targetGrade = gradeIdx > -1 ? { ...newRecord.grades[gradeIdx] } : {
-        studentId: record.student.id,
-        classAssignmentId,
-        quarter: selectedQuarter,
-        writtenWorkScores: [],
-        perfTaskScores: [],
-        quarterlyAssessScore: 0,
-        quarterlyAssessMax: 100
-      } as any;
-
-      if (category === 'WW') {
-        const scores = [...(targetGrade.writtenWorkScores as any[] || [])];
-        while (scores.length <= index) scores.push({ name: `WW ${scores.length+1}`, score: 0, maxScore: newMax });
-        scores[index] = { ...scores[index], maxScore: newMax };
-        targetGrade.writtenWorkScores = applyMetaToScores(scores as ScoreItem[], 'WW', index + 1);
-      } else if (category === 'PT') {
-        const scores = [...(targetGrade.perfTaskScores as any[] || [])];
-        while (scores.length <= index) scores.push({ name: `PT ${scores.length+1}`, score: 0, maxScore: newMax });
-        scores[index] = { ...scores[index], maxScore: newMax };
-        targetGrade.perfTaskScores = applyMetaToScores(scores as ScoreItem[], 'PT', index + 1);
-      } else if (category === 'QA') {
-        targetGrade.quarterlyAssessMax = newMax;
-        targetGrade.qaDescription = qaMeta.description || null;
-        targetGrade.qaDate = qaMeta.date || null;
-      }
-
-      if (gradeIdx > -1) newRecord.grades[gradeIdx] = targetGrade;
-      else newRecord.grades.push(targetGrade);
-      return newRecord;
-    }));
-    
-    try {
-      const updatePromises = classRecord.map(record => {
-        const grade = record.grades.find(g => g.quarter === selectedQuarter);
-        const wwScores = [...((grade?.writtenWorkScores || []) as ScoreItem[])];
-        const ptScores = [...((grade?.perfTaskScores || []) as ScoreItem[])];
-        
-        if (category === 'WW') {
-          while (wwScores.length <= index) wwScores.push({ name: `WW ${wwScores.length + 1}`, score: 0, maxScore: newMax });
-          wwScores[index].maxScore = newMax;
-        } else if (category === 'PT') {
-          while (ptScores.length <= index) ptScores.push({ name: `PT ${ptScores.length + 1}`, score: 0, maxScore: newMax });
-          ptScores[index].maxScore = newMax;
-        }
-
-        const wwScoresWithMeta = applyMetaToScores(wwScores, 'WW', index + 1);
-        const ptScoresWithMeta = applyMetaToScores(ptScores, 'PT', index + 1);
-
-        return gradesApi.saveGrade({
-          studentId: record.student.id,
-          classAssignmentId,
-          quarter: selectedQuarter,
-          writtenWorkScores: category === 'WW' ? wwScoresWithMeta : undefined,
-          perfTaskScores: category === 'PT' ? ptScoresWithMeta : undefined,
-          quarterlyAssessMax: category === 'QA' ? newMax : undefined,
-          qaDescription: qaMeta.description || undefined,
-          qaDate: qaMeta.date || undefined,
-        });
-      });
-
-      await Promise.all(updatePromises);
-      fetchClassRecord(true);
-    } catch (err: any) {
-      console.error("Failed to update HPS:", err);
-      setError(err?.response?.data?.message || "Failed to save HPS changes.");
-      fetchClassRecord(true);
-    }
+    await executeHpsUpdate({
+      classAssignmentId,
+      classRecord,
+      selectedQuarter,
+      category,
+      index,
+      newMax,
+      qaMeta,
+      applyMetaToScores,
+      setClassRecord,
+      setError,
+      fetchClassRecord,
+    });
   };
 
   const handleDescriptorUpdate = async (studentId: string, descriptor: string) => {
@@ -1040,70 +613,22 @@ export default function ClassRecordView() {
   };
 
   const removeTask = async (category: 'WW' | 'PT') => {
-    if (!classAssignmentId || classRecord.length === 0) return;
-
-    const currentCount = category === 'WW' ? wwCount : ptCount;
-    if (currentCount <= 1) return;
-
-    if (category === 'WW') {
-      setWwMeta((prev) => prev.slice(0, Math.max(0, prev.length - 1)));
-    } else {
-      setPtMeta((prev) => prev.slice(0, Math.max(0, prev.length - 1)));
-    }
-
-    // 1. Optimistic local update
-    setClassRecord(prev => prev.map(record => {
-      const newRecord = { ...record, grades: [...record.grades] };
-      const gradeIdx = newRecord.grades.findIndex(g => g.quarter === selectedQuarter);
-      if (gradeIdx === -1) return newRecord;
-
-      const targetGrade = { ...newRecord.grades[gradeIdx] } as any;
-      if (category === 'WW') {
-        const scores = [...((targetGrade.writtenWorkScores || []) as ScoreItem[])];
-        targetGrade.writtenWorkScores = scores.slice(0, Math.max(0, scores.length - 1));
-      } else {
-        const scores = [...((targetGrade.perfTaskScores || []) as ScoreItem[])];
-        targetGrade.perfTaskScores = scores.slice(0, Math.max(0, scores.length - 1));
-      }
-
-      newRecord.grades[gradeIdx] = targetGrade;
-      return newRecord;
-    }));
-
-    try {
-      const updatePromises = classRecord.map(record => {
-        const grade = record.grades.find(g => g.quarter === selectedQuarter);
-        const wwScores = [...((grade?.writtenWorkScores || []) as ScoreItem[])];
-        const ptScores = [...((grade?.perfTaskScores || []) as ScoreItem[])];
-
-        if (category === 'WW') {
-          wwScores.splice(Math.max(0, wwScores.length - 1), 1);
-        } else {
-          ptScores.splice(Math.max(0, ptScores.length - 1), 1);
-        }
-
-        const wwScoresWithMeta = applyMetaToScores(wwScores, 'WW');
-        const ptScoresWithMeta = applyMetaToScores(ptScores, 'PT');
-
-        return gradesApi.saveGrade({
-          studentId: record.student.id,
-          classAssignmentId,
-          quarter: selectedQuarter,
-          writtenWorkScores: category === 'WW' ? wwScoresWithMeta : undefined,
-          perfTaskScores: category === 'PT' ? ptScoresWithMeta : undefined,
-          qaDescription: qaMeta.description || undefined,
-          qaDate: qaMeta.date || undefined,
-        });
-      });
-
-      await Promise.all(updatePromises);
-      fetchClassRecord(true);
-      setSuccess(`${category} activity removed`);
-    } catch (err: any) {
-      console.error(`Failed to remove ${category} task:`, err);
-      fetchClassRecord(true);
-      setError(err?.response?.data?.message || `Failed to remove ${category} activity`);
-    }
+    await executeRemoveTask({
+      classAssignmentId,
+      classRecord,
+      selectedQuarter,
+      category,
+      wwCount,
+      ptCount,
+      qaMeta,
+      applyMetaToScores,
+      setClassRecord,
+      setWwMeta,
+      setPtMeta,
+      setSuccess,
+      setError,
+      fetchClassRecord,
+    });
   };
 
   const stats = useMemo(() => {
@@ -1167,6 +692,78 @@ export default function ClassRecordView() {
   const maleRecords = useMemo(() => sortedRecords.filter(r => r.student.gender?.toLowerCase() === 'male'), [sortedRecords]);
   const femaleRecords = useMemo(() => sortedRecords.filter(r => r.student.gender?.toLowerCase() === 'female'), [sortedRecords]);
 
+  const activeWeights = useMemo(() => ({
+    ww: effectiveWeights?.ww ?? classAssignment?.subject?.writtenWorkWeight ?? 0,
+    pt: effectiveWeights?.pt ?? classAssignment?.subject?.perfTaskWeight ?? 0,
+    qa: effectiveWeights?.qa ?? classAssignment?.subject?.quarterlyAssessWeight ?? 0,
+  }), [effectiveWeights, classAssignment?.subject?.writtenWorkWeight, classAssignment?.subject?.perfTaskWeight, classAssignment?.subject?.quarterlyAssessWeight]);
+
+  const getDisplayFinalGrade = (record: ClassRecord): number | null =>
+    computeDisplayFinalGrade(record, selectedQuarter, activeWeights);
+
+  const openMobileEditor = (studentId: string) => {
+    setMobileEditorStudentId(studentId);
+    setMobileEditorOpen(true);
+    setMobileScoreDraft({});
+    setMobileEditorTab(isHGClass ? 'HG' : 'WW');
+  };
+
+  const selectedMobileRecord = useMemo(
+    () => sortedRecords.find((record) => record.student.id === mobileEditorStudentId) ?? null,
+    [sortedRecords, mobileEditorStudentId]
+  );
+
+  const handleMobileDraftChange = (
+    studentId: string,
+    category: 'WW' | 'PT' | 'QA',
+    index: number,
+    value: string,
+  ) => {
+    const key = getMobileDraftKey(studentId, category, index);
+    if (value === '') {
+      setMobileScoreDraft((prev) => ({ ...prev, [key]: '' }));
+      return;
+    }
+
+    const parsed = Number(value);
+    const maxAllowed = getMaxForCell(category, index);
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > maxAllowed) {
+      setMobileScoreDraft((prev) => ({ ...prev, [key]: '' }));
+      setInvalidCells((prev) => ({ ...prev, [getCellKey(studentId, category, index)]: `Score cannot exceed ${maxAllowed}.` }));
+      return;
+    }
+
+    setMobileScoreDraft((prev) => ({ ...prev, [key]: value }));
+    setInvalidCells((prev) => {
+      const cellKey = getCellKey(studentId, category, index);
+      if (!prev[cellKey]) return prev;
+      const next = { ...prev };
+      delete next[cellKey];
+      return next;
+    });
+  };
+
+  const commitMobileScore = (
+    record: ClassRecord,
+    category: 'WW' | 'PT' | 'QA',
+    index: number,
+  ) => {
+    const key = getMobileDraftKey(record.student.id, category, index);
+    const value = mobileScoreDraft[key] ?? computeScoreFromGrade(record, selectedQuarter, category, index);
+    const normalized = value.trim() === '' ? 0 : Number(value);
+    const maxAllowed = getMaxForCell(category, index);
+
+    if (Number.isNaN(normalized) || normalized < 0 || normalized > maxAllowed) {
+      setMobileScoreDraft((prev) => ({ ...prev, [key]: '' }));
+      setError(`${category} ${category === 'QA' ? '' : index + 1} score cannot exceed MAX (${maxAllowed}).`.trim());
+      setInvalidCells((prev) => ({ ...prev, [getCellKey(record.student.id, category, index)]: `Score cannot exceed ${maxAllowed}.` }));
+      return;
+    }
+
+    setMobileScoreDraft((prev) => ({ ...prev, [key]: normalized === 0 ? '' : String(normalized) }));
+    handleScoreUpdate(record.student.id, category, index, normalized);
+  };
+
   const [ecrProgress, setEcrProgress] = useState<string>('');
   const [ecrPercentage, setEcrPercentage] = useState<number>(0);
   const [showEcrGenerationDialog, setShowEcrGenerationDialog] = useState(false);
@@ -1229,14 +826,14 @@ export default function ClassRecordView() {
   }
 
   if (!classAssignment) return null;
-  const headerRowHeight = 40;
   const topNavHeight = 64;
-  const detailsTop = topNavHeight + Math.ceil(ledgerHeaderHeight);
-  const stickyTop = topNavHeight + Math.ceil(ledgerHeaderHeight) + (showAssessmentDetails ? Math.ceil(assessmentDetailsHeight) : 0);
+  const metaEditorTop = topNavHeight + Math.ceil(ledgerHeaderHeight) - 1; // 1px overlap
+  const metaEditorOffset = metaEditorTarget ? Math.ceil(metaEditorHeight) - 1 : 0; // 1px overlap
+  const assessmentDetailsTop = metaEditorTop + metaEditorOffset;
+  const stickyTop = assessmentDetailsTop + (showAssessmentDetails ? Math.ceil(assessmentDetailsHeight) - 1 : 0); // 1px overlap
   const headerTop = Math.floor(stickyTop);
   const subHeaderTop = headerTop + 39; // 1px overlap
   const hpsTop = subHeaderTop + 39; // 1px overlap
-  const isArchivedAssignment = classAssignment.isActive === false;
 
   return (
     <div className="space-y-8 animate-fade-in max-w-full mx-auto px-6 pb-12">
@@ -1249,694 +846,152 @@ export default function ClassRecordView() {
         </div>
       )}
 
-      {/* Header Section */}
-      <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 shadow-xl shadow-slate-200/50">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50/50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-8">
-          <div className="flex items-center gap-6">
-            <Link to="/teacher/classes">
-              <Button variant="ghost" size="icon" className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 hover:bg-indigo-600 hover:text-white transition-all border border-slate-100 shadow-sm">
-                <ArrowLeft className="w-6 h-6" />
-              </Button>
-            </Link>
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Badge className="bg-indigo-50 text-indigo-700 border-indigo-100 text-[10px] font-black uppercase tracking-widest px-3">{gradeLevelLabels[classAssignment.section.gradeLevel]}</Badge>
-                <div className="h-4 w-px bg-slate-200" />
-                <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Section {classAssignment.section.name}</span>
-              </div>
-              <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase">{classAssignment.subject.name}</h1>
-              {effectiveWeights?.source === "generic-fallback" && !isHGClass && (
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mt-2">
-                  Generic WW/PT/QA fallback active (no exact ECR template for this subject)
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {!isHGClass ? (
-              <>
-                <Button variant="outline" className="h-12 px-6 rounded-2xl border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all shadow-sm" onClick={downloadECR}>
-                  <Download className="w-4 h-4 mr-2" />EXPORT ECR
-                </Button>
-                <Button className="h-12 px-8 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-black text-[10px] tracking-widest uppercase transition-all shadow-xl shadow-slate-300" onClick={() => ecrFileInputRef.current?.click()}>
-                  <Upload className="w-4 h-4 mr-3" />IMPORT ECR
-                </Button>
-                <input type="file" ref={ecrFileInputRef} onChange={handleEcrFileSelect} accept=".xlsx,.xls" className="hidden" />
-              </>
-            ) : (
-              <Badge className="h-9 px-4 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 font-bold">
-                Qualitative Grading Mode
-              </Badge>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {isArchivedAssignment && (
-        <Card className="border-0 shadow-lg shadow-rose-100/50 rounded-[2rem] overflow-hidden bg-rose-50/60 border border-rose-100">
-          <CardContent className="p-6 flex flex-col gap-2">
-            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-rose-600">Archived from Atlas</p>
-            <p className="text-sm font-bold text-slate-700">
-              This subject was removed from the current Atlas load. SMART keeps the grade history for recovery, but this class is no longer active on the dashboard.
-            </p>
-            {classAssignment.archivedReason && (
-              <p className="text-[10px] font-semibold text-rose-500 uppercase tracking-widest">
-                Reason: {classAssignment.archivedReason}
-              </p>
-            )}
-            <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">
-              If this was not intended, contact the EnrollPro/Atlas admin to restore the subject assignment.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      <ClassRecordHero
+        classAssignment={classAssignment}
+        isHGClass={isHGClass}
+        effectiveWeightsSource={effectiveWeights?.source ?? null}
+        onExportEcr={downloadECR}
+        onOpenImport={() => ecrFileInputRef.current?.click()}
+        onImportSelect={handleEcrFileSelect}
+        fileInputRef={ecrFileInputRef}
+      />
 
       {isHGClass && (
-        <Card className="border-0 shadow-2xl shadow-slate-200/40 rounded-[2.5rem] overflow-hidden bg-white">
-          <CardHeader className="p-8 border-0 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-            <div>
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Homeroom Guidance Descriptors</h2>
-              <p className="text-slate-500 text-sm mt-1">Select one qualitative descriptor per learner for {selectedQuarter}.</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Period:</span>
-              <Select value={selectedQuarter} onValueChange={(val) => val && setSelectedQuarter(val)}>
-                <SelectTrigger className="h-11 w-40 bg-white border-slate-200 text-sm font-black uppercase rounded-xl shadow-sm px-6">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl border-slate-200 shadow-2xl p-2">
-                  {quarters.map((q) => (
-                    <SelectItem key={q} value={q} className="text-xs font-black uppercase rounded-lg py-2.5 px-4 focus:bg-indigo-50 focus:text-indigo-600 transition-colors cursor-pointer">
-                      {q}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <div className="overflow-x-auto border-t border-slate-100">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-14">#</TableHead>
-                  <TableHead>LRN</TableHead>
-                  <TableHead>Learner</TableHead>
-                  <TableHead className="w-[320px]">Descriptor ({selectedQuarter})</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedRecords.map((record, index) => {
-                  const quarterGrade = record.grades.find((g) => g.quarter === selectedQuarter);
-                  const descriptor = quarterGrade?.qualitativeDescriptor ?? '';
-                  const isSaving = savingDescriptorStudentId === record.student.id;
-                  return (
-                    <TableRow key={record.student.id}>
-                      <TableCell className="font-semibold">{index + 1}</TableCell>
-                      <TableCell className="font-mono text-xs">{record.student.lrn}</TableCell>
-                      <TableCell className="font-semibold">{record.student.lastName}, {record.student.firstName}</TableCell>
-                      <TableCell>
-                        <Select
-                          value={descriptor || undefined}
-                          onValueChange={(value) => {
-                            if (!value) return;
-                            handleDescriptorUpdate(record.student.id, value);
-                          }}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger className="h-10 rounded-xl">
-                            <SelectValue placeholder="Select descriptor" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {HG_DESCRIPTORS.map((item) => (
-                              <SelectItem key={item} value={item}>{item}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
+        <>
+          <ClassRecordMobileList
+            records={sortedRecords}
+            selectedQuarter={selectedQuarter}
+            isHGClass
+            onQuarterChange={setSelectedQuarter}
+            onOpenEditor={openMobileEditor}
+            getDisplayFinalGrade={getDisplayFinalGrade}
+            getGradeColor={getGradeColor}
+          />
+          <HGDescriptorPanel
+            records={sortedRecords}
+            selectedQuarter={selectedQuarter}
+            onQuarterChange={setSelectedQuarter}
+            savingDescriptorStudentId={savingDescriptorStudentId}
+            descriptors={HG_DESCRIPTORS}
+            onDescriptorUpdate={handleDescriptorUpdate}
+          />
+        </>
       )}
 
       {/* Analytics Insights */}
       {!isHGClass && stats && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {[
-            { label: "Class Average", value: stats.avg.toFixed(1), icon: Target, color: "indigo" },
-            { label: "Passing Rate", value: `${Math.round((stats.passed/classRecord.length)*100)}%`, icon: TrendingUp, color: "emerald" },
-            { label: "Highest Grade", value: stats.highest, icon: Award, color: "amber" },
-            { label: "Needs Support", value: classRecord.length - stats.passed, icon: TrendingDown, color: "rose" },
-          ].map((stat) => (
-            <Card key={stat.label} className="border-0 shadow-lg shadow-slate-200/50 rounded-[2rem] bg-white overflow-hidden group hover:-translate-y-1 transition-all duration-300">
-              <CardContent className="p-7 flex flex-col justify-between h-full">
-                <div className="p-3 rounded-2xl w-fit mb-4 bg-slate-50 group-hover:bg-white transition-colors shadow-sm">
-                  <stat.icon className={`w-6 h-6 text-${stat.color}-600`} />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{stat.label}</p>
-                  <p className="text-3xl font-black text-slate-900 leading-none">{stat.value}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <ClassRecordStats
+          avg={stats.avg}
+          passed={stats.passed}
+          total={classRecord.length}
+          highest={stats.highest}
+        />
       )}
 
       {/* Main Ledger Table */}
       {!isHGClass && (
-      <Card className="border-0 shadow-2xl shadow-slate-200/40 rounded-[2.5rem] overflow-visible bg-white">
-        <div ref={ledgerHeaderRef} className="sticky z-40 bg-white" style={{ top: topNavHeight }}>
-          <CardHeader className="p-8 border-0 flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-white">
-            <div className="flex items-center gap-8">
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight uppercase">Class Ledger</h2>
-              <div className="flex items-center bg-slate-50 p-1 rounded-2xl border border-slate-100 shadow-inner">
-                <Button 
-                  variant="ghost" 
-                  onClick={() => setSeparateByGender(false)} 
-                  className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${!separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  Alphabetical
-                </Button>
-                <Button 
-                  variant="ghost" 
-                  onClick={() => setSeparateByGender(true)} 
-                  className={`h-9 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${separateByGender ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  Gendered
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                className={`h-11 rounded-xl border-slate-200 font-bold ${showAssessmentDetails ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'text-slate-600'}`}
-                onClick={() => setShowAssessmentDetails((prev) => !prev)}
-              >
-                Optional Assessment Details
-              </Button>
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Period:</span>
-              <Select value={selectedQuarter} onValueChange={(val) => val && setSelectedQuarter(val)}>
-                <SelectTrigger className="h-11 w-40 bg-white border-slate-200 text-sm font-black uppercase rounded-xl shadow-sm px-6">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl border-slate-200 shadow-2xl p-2">
-                  {quarters.map((q) => (
-                    <SelectItem key={q} value={q} className="text-xs font-black uppercase rounded-lg py-2.5 px-4 focus:bg-indigo-50 focus:text-indigo-600 transition-colors cursor-pointer">
-                      {q}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-        </div>
+        <>
+          <ClassRecordMobileList
+            records={sortedRecords}
+            selectedQuarter={selectedQuarter}
+            isHGClass={false}
+            onQuarterChange={setSelectedQuarter}
+            onOpenEditor={openMobileEditor}
+            getDisplayFinalGrade={getDisplayFinalGrade}
+            getGradeColor={getGradeColor}
+          />
 
-        {metaEditorTarget && (
-          <div className="mx-8 -mt-1 mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-1">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-                    {metaEditorTarget.category} {metaEditorTarget.category === 'QA' ? '' : metaEditorTarget.index + 1} Description (Optional)
-                  </p>
-                  <input
-                    type="text"
-                    value={metaEditorDraft.description}
-                    onChange={(e) => setMetaEditorDraft((prev) => ({ ...prev, description: e.target.value }))}
-                    placeholder={`${metaEditorTarget.category} description`}
-                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold"
-                  />
-                </div>
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">Column Date (Applies To All Students)</p>
-                  <input
-                    type="date"
-                    value={metaEditorDraft.date}
-                    onChange={(e) => setMetaEditorDraft((prev) => ({ ...prev, date: e.target.value }))}
-                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  className="h-9 rounded-lg text-xs font-bold"
-                  onClick={() => setMetaEditorTarget(null)}
-                  disabled={savingMeta}
-                >
-                  Close
-                </Button>
-                <Button
-                  className="h-9 rounded-lg text-xs font-black uppercase tracking-widest bg-slate-900 hover:bg-slate-800 text-white"
-                  onClick={saveColumnMeta}
-                  disabled={savingMeta}
-                >
-                  {savingMeta ? 'Applying...' : 'Apply'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showAssessmentDetails && (
-          <div
-            ref={assessmentDetailsRef}
-            className="mx-8 mb-4 rounded-2xl border border-slate-200 bg-white p-4 sticky z-40 shadow-sm"
-            style={{ top: detailsTop }}
-          >
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="rounded-xl bg-white border border-indigo-100 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600 mb-3">Written Work (Optional)</p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">WW 1 Date</label>
-                <input
-                  type="date"
-                  value={wwMeta[0]?.date || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setWwMeta((prev) => {
-                      const next = [...prev];
-                      while (next.length < wwCount) next.push({ description: `WW ${next.length + 1}`, date: '' });
-                      next[0] = { ...(next[0] || { description: 'WW 1', date: '' }), date: val };
-                      return next;
-                    });
-                  }}
-                  className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                />
-                {Array.from({ length: wwCount }).map((_, i) => (
-                  <input
-                    key={`ww-meta-${i}`}
-                    type="text"
-                    value={wwMeta[i]?.description || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setWwMeta((prev) => {
-                        const next = [...prev];
-                        while (next.length <= i) next.push({ description: `WW ${next.length + 1}`, date: next[0]?.date || '' });
-                        next[i] = { ...next[i], description: val };
-                        return next;
-                      });
-                    }}
-                    placeholder={`WW ${i + 1} description`}
-                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                  />
-                ))}
-              </div>
-
-              <div className="rounded-xl bg-white border border-purple-100 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-purple-600 mb-3">Performance Tasks (Optional)</p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">PT 1 Date</label>
-                <input
-                  type="date"
-                  value={ptMeta[0]?.date || ''}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setPtMeta((prev) => {
-                      const next = [...prev];
-                      while (next.length < ptCount) next.push({ description: `PT ${next.length + 1}`, date: '' });
-                      next[0] = { ...(next[0] || { description: 'PT 1', date: '' }), date: val };
-                      return next;
-                    });
-                  }}
-                  className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                />
-                {Array.from({ length: ptCount }).map((_, i) => (
-                  <input
-                    key={`pt-meta-${i}`}
-                    type="text"
-                    value={ptMeta[i]?.description || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPtMeta((prev) => {
-                        const next = [...prev];
-                        while (next.length <= i) next.push({ description: `PT ${next.length + 1}`, date: next[0]?.date || '' });
-                        next[i] = { ...next[i], description: val };
-                        return next;
-                      });
-                    }}
-                    placeholder={`PT ${i + 1} description`}
-                    className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                  />
-                ))}
-              </div>
-
-              <div className="rounded-xl bg-white border border-amber-100 p-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-3">Quarterly Assessment (Optional)</p>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">QA Date</label>
-                <input
-                  type="date"
-                  value={qaMeta.date}
-                  onChange={(e) => setQaMeta((prev) => ({ ...prev, date: e.target.value }))}
-                  className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                />
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">QA Description</label>
-                <input
-                  type="text"
-                  value={qaMeta.description}
-                  onChange={(e) => setQaMeta((prev) => ({ ...prev, description: e.target.value }))}
-                  placeholder="QA Description"
-                  className="w-full h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold mb-2"
-                />
-                <Button onClick={saveAssessmentDetails} className="w-full h-9 rounded-lg text-xs font-black uppercase tracking-widest bg-slate-900 hover:bg-slate-800 text-white">
-                  Save Details
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="relative overflow-visible border-t border-slate-100">
-          <Table className="border-separate border-spacing-0 table-fixed w-max min-w-full">
-            <TableHeader className="bg-slate-50">
-              {/* Grouped Header Row */}
-              <TableRow className="hover:bg-transparent border-0 bg-slate-50 h-10 transition-none">
-                <TableHead
-                  colSpan={3}
-                  className="border-r border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center px-0 w-[400px] bg-slate-50 sticky z-30 bg-clip-padding"
-                  style={{ top: headerTop }}
-                >
-                  LEARNER INFORMATION
-                </TableHead>
-                <TableHead
-                  colSpan={wwCount + 3}
-                  className="border-r border-b border-slate-200 text-[10px] font-black text-indigo-600 uppercase tracking-widest text-center px-0 bg-indigo-50 sticky z-30 bg-clip-padding"
-                  style={{ top: headerTop }}
-                >
-                  <div className="flex items-center justify-center gap-3">
-                    WRITTEN WORK ({effectiveWeights?.ww ?? classAssignment.subject.writtenWorkWeight}%)
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      disabled={wwCount <= 1}
-                      className="w-6 h-6 rounded-full bg-white text-indigo-600 shadow-sm border border-indigo-100 hover:bg-indigo-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                      onClick={() => removeTask('WW')}
-                    >
-                      <Minus className="w-3 h-3" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="w-6 h-6 rounded-full bg-white text-indigo-600 shadow-sm border border-indigo-100 hover:bg-indigo-600 hover:text-white transition-all"
-                      onClick={() => addTask('WW')}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </TableHead>
-                <TableHead
-                  colSpan={ptCount + 3}
-                  className="border-r border-b border-slate-200 text-[10px] font-black text-purple-600 uppercase tracking-widest text-center px-0 bg-purple-50 sticky z-30 bg-clip-padding"
-                  style={{ top: headerTop }}
-                >
-                  <div className="flex items-center justify-center gap-3">
-                    PERF. TASKS ({effectiveWeights?.pt ?? classAssignment.subject.perfTaskWeight}%)
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      disabled={ptCount <= 1}
-                      className="w-6 h-6 rounded-full bg-white text-purple-600 shadow-sm border border-purple-100 hover:bg-purple-600 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                      onClick={() => removeTask('PT')}
-                    >
-                      <Minus className="w-3 h-3" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="w-6 h-6 rounded-full bg-white text-purple-600 shadow-sm border border-purple-100 hover:bg-purple-600 hover:text-white transition-all"
-                      onClick={() => addTask('PT')}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </TableHead>
-                <TableHead
-                  colSpan={3}
-                  className="border-r border-b border-slate-200 text-[10px] font-black text-amber-600 uppercase tracking-widest text-center px-0 bg-amber-50 sticky z-30 bg-clip-padding"
-                  style={{ top: headerTop }}
-                >
-                  QA ({effectiveWeights?.qa ?? classAssignment.subject.quarterlyAssessWeight}%)
-                </TableHead>
-                <TableHead
-                  colSpan={2}
-                  className="border-b border-slate-200 text-[10px] font-black text-emerald-600 uppercase tracking-widest text-center px-0 bg-emerald-50 sticky z-30 bg-clip-padding"
-                  style={{ top: headerTop }}
-                >
-                  Summary
-                </TableHead>
-              </TableRow>
-              {/* Detailed Header Row */}
-              <TableRow className="hover:bg-transparent border-0 h-10 bg-white transition-none">
-                <TableHead
-                  className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  #
-                </TableHead>
-                <TableHead
-                  className="w-28 text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 px-3 bg-white sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  LRN
-                </TableHead>
-                <TableHead
-                  className="w-56 text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-200 px-3 bg-white sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  Full Name
-                </TableHead>
-                
-                {/* Dynamic WW Columns */}
-                {Array.from({ length: wwCount }).map((_, i) => (
-                  <TableHead
-                    key={`h-ww-${i}`}
-                    className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
-                    style={{ top: subHeaderTop }}
-                  >
-                    {i + 1}
-                  </TableHead>
-                ))}
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-b border-slate-100 bg-slate-100 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  Total
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-indigo-600 uppercase border-r border-b border-slate-100 bg-indigo-50 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  PS
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-indigo-700 uppercase border-r border-b border-slate-200 bg-indigo-100 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  WS
-                </TableHead>
-                
-                {/* Dynamic PT Columns */}
-                {Array.from({ length: ptCount }).map((_, i) => (
-                  <TableHead
-                    key={`h-pt-${i}`}
-                    className="w-10 text-center text-[9px] font-black text-slate-400 uppercase border-r border-b border-slate-100 bg-white sticky z-30 bg-clip-padding"
-                    style={{ top: subHeaderTop }}
-                  >
-                    {i + 1}
-                  </TableHead>
-                ))}
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-slate-500 uppercase border-r border-b border-slate-100 bg-slate-100 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  Total
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-purple-600 uppercase border-r border-b border-slate-100 bg-purple-50 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  PS
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-purple-700 uppercase border-r border-b border-slate-200 bg-purple-100 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  WS
-                </TableHead>
-                
-                {/* QA */}
-                <TableHead
-                  className="w-14 text-center text-[9px] font-black text-amber-600 uppercase border-r border-b border-slate-100 bg-amber-50 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  SCORE
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-amber-600 uppercase border-r border-b border-slate-100 bg-amber-50 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  PS
-                </TableHead>
-                <TableHead
-                  className="w-12 text-center text-[9px] font-black text-amber-700 uppercase border-r border-b border-slate-200 bg-amber-100 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  WS
-                </TableHead>
-                
-                <TableHead
-                  className="w-16 text-center text-[9px] font-black text-emerald-600 uppercase border-r border-b border-slate-100 bg-emerald-50 sticky z-30 bg-clip-padding"
-                  style={{ top: subHeaderTop }}
-                >
-                  INITIAL
-                </TableHead>
-                <TableHead
-                  className="w-16 text-center text-[9px] font-black text-slate-900 uppercase bg-emerald-100 font-bold sticky z-30 bg-clip-padding border-b border-slate-200"
-                  style={{ top: subHeaderTop }}
-                >
-                  FINAL
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(() => {
-                const weights = {
-                  ww: effectiveWeights?.ww ?? classAssignment.subject.writtenWorkWeight,
-                  pt: effectiveWeights?.pt ?? classAssignment.subject.perfTaskWeight,
-                  qa: effectiveWeights?.qa ?? classAssignment.subject.quarterlyAssessWeight
-                };
-
-                const rows = [];
-                let rowCounter = 0;
-                // HPS (Benchmark) row
-                rows.push(
-                  <LedgerRow 
-                    key="HPS-ROW" 
-                    record={null} 
-                    idx={0} 
-                    rowIndex={-1}
-                    isHps={true} 
-                    hpsStickyTop={hpsTop}
-                    hpsData={hpsData}
-                    selectedQuarter={selectedQuarter} 
-                    wwCount={wwCount} 
-                    ptCount={ptCount} 
-                    weights={weights} 
-                    onHpsUpdate={handleHpsUpdate} 
-                    onScoreCommit={commitScoreInput}
-                    onCellFocus={openMetaEditor}
-                    isCellInvalid={isCellInvalid}
-                  />
-                );
-
-                if (separateByGender) {
-                  if (maleRecords.length > 0) {
-                    rows.push(
-                      <TableRow key="male-sep" className="bg-blue-50/50 hover:bg-blue-50/50 border-y border-blue-100/50 h-8">
-                        <TableCell colSpan={wwCount + ptCount + 14} className="py-1 px-8">
-                          <span className="text-[9px] font-black text-blue-600 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                            MALE LEARNERS ({maleRecords.length})
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                    maleRecords.forEach((r, i) => rows.push(
-                      <LedgerRow 
-                        key={r.student.id} 
-                        record={r} 
-                        idx={i} 
-                        rowIndex={rowCounter++}
-                        selectedQuarter={selectedQuarter} 
-                        wwCount={wwCount} 
-                        ptCount={ptCount} 
-                        weights={weights} 
-                        onHpsUpdate={handleHpsUpdate} 
-                        onScoreCommit={commitScoreInput}
-                        onCellFocus={openMetaEditor}
-                        isCellInvalid={isCellInvalid}
-                      />
-                    ));
-                  }
-                  if (femaleRecords.length > 0) {
-                    rows.push(
-                      <TableRow key="female-sep" className="bg-pink-50/50 hover:bg-pink-50/50 border-y border-pink-100/50 h-8">
-                        <TableCell colSpan={wwCount + ptCount + 14} className="py-1 px-8">
-                          <span className="text-[9px] font-black text-pink-600 uppercase tracking-[0.2em] flex items-center gap-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-pink-500" />
-                            FEMALE LEARNERS ({femaleRecords.length})
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    );
-                    femaleRecords.forEach((r, i) => rows.push(
-                      <LedgerRow 
-                        key={r.student.id} 
-                        record={r} 
-                        idx={i} 
-                        rowIndex={rowCounter++}
-                        selectedQuarter={selectedQuarter} 
-                        wwCount={wwCount} 
-                        ptCount={ptCount} 
-                        weights={weights} 
-                        onHpsUpdate={handleHpsUpdate} 
-                        onScoreCommit={commitScoreInput}
-                        onCellFocus={openMetaEditor}
-                        isCellInvalid={isCellInvalid}
-                      />
-                    ));
-                  }
-                } else {
-                  sortedRecords.forEach((r, i) => rows.push(
-                    <LedgerRow 
-                      key={r.student.id} 
-                      record={r} 
-                      idx={i} 
-                      rowIndex={rowCounter++}
-                      selectedQuarter={selectedQuarter} 
-                      wwCount={wwCount} 
-                      ptCount={ptCount} 
-                      weights={weights} 
-                      onHpsUpdate={handleHpsUpdate} 
-                      onScoreCommit={commitScoreInput}
-                      onCellFocus={openMetaEditor}
-                      isCellInvalid={isCellInvalid}
-                    />
-                  ));
-                }
-                return rows;
-              })()}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+          <ClassRecordTable
+            classAssignment={classAssignment}
+            effectiveWeights={effectiveWeights}
+            selectedQuarter={selectedQuarter}
+            onQuarterChange={setSelectedQuarter}
+            separateByGender={separateByGender}
+            onSeparateByGenderChange={setSeparateByGender}
+            showAssessmentDetails={showAssessmentDetails}
+            onToggleAssessmentDetails={() => setShowAssessmentDetails((prev) => !prev)}
+            ledgerHeaderRef={ledgerHeaderRef}
+            topNavHeight={topNavHeight}
+            headerTop={headerTop}
+            subHeaderTop={subHeaderTop}
+            hpsTop={hpsTop}
+            wwCount={wwCount}
+            ptCount={ptCount}
+            hpsData={hpsData}
+            sortedRecords={sortedRecords}
+            maleRecords={maleRecords}
+            femaleRecords={femaleRecords}
+            onRemoveTask={removeTask}
+            onAddTask={addTask}
+            onHpsUpdate={handleHpsUpdate}
+            onScoreCommit={commitScoreInput}
+            onCellFocus={openMetaEditor}
+            isCellInvalid={isCellInvalid}
+            assessmentHeaderNode={
+              <AssessmentHeader
+                showAssessmentDetails={showAssessmentDetails}
+                metaEditorTop={metaEditorTop}
+                assessmentDetailsTop={assessmentDetailsTop}
+                assessmentDetailsRef={assessmentDetailsRef}
+                metaEditorRef={metaEditorRef}
+                wwCount={wwCount}
+                ptCount={ptCount}
+                wwMeta={wwMeta}
+                ptMeta={ptMeta}
+                qaMeta={qaMeta}
+                setWwMeta={setWwMeta}
+                setPtMeta={setPtMeta}
+                setQaMeta={setQaMeta}
+                saveAssessmentDetails={saveAssessmentDetails}
+                savingMeta={savingMeta}
+                metaEditorTarget={metaEditorTarget}
+                metaEditorDraft={metaEditorDraft}
+                setMetaEditorDraft={setMetaEditorDraft}
+                setMetaEditorTarget={setMetaEditorTarget}
+                saveColumnMeta={saveColumnMeta}
+              />
+            }
+          />
+        </>
       )}
 
-      <Dialog open={showEcrGenerationDialog} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-md rounded-[2.5rem] border-0 shadow-2xl p-0 overflow-hidden bg-white">
-          <div className="p-10 text-center">
-            <div className="relative w-32 h-32 mx-auto mb-8">
-              <svg className="w-full h-full -rotate-90">
-                <circle cx="64" cy="64" r="58" stroke="#f8fafc" strokeWidth="10" fill="none" />
-                <circle cx="64" cy="64" r="58" stroke={colors.primary} strokeWidth="10" fill="none" strokeDasharray="364.4" strokeDashoffset={364.4 * (1 - ecrPercentage / 100)} className="transition-all duration-700 ease-out" strokeLinecap="round" />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center"><span className="text-2xl font-black" style={{ color: colors.primary }}>{ecrPercentage}%</span></div>
-            </div>
-            <h3 className="text-xl font-black text-slate-900 mb-2">Generating Workbook</h3>
-            <p className="text-slate-500 font-medium text-sm mb-8 px-4">{ecrProgress}</p>
-            <div className="bg-slate-50 rounded-3xl p-6 text-left border border-slate-100 flex items-start gap-5">
-              <div className="p-3 rounded-2xl bg-white shadow-sm"><FileSpreadsheet className="w-6 h-6 text-emerald-500" /></div>
-              <div className="space-y-1">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">System Message</p>
-                <p className="text-xs font-bold text-slate-700 leading-relaxed">Your Electronic Class Record is being auto-filled with student data. It will download automatically.</p>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <GradeEditModal
+        open={mobileEditorOpen}
+        onOpenChange={(open) => {
+          setMobileEditorOpen(open);
+          if (!open) {
+            setMobileEditorStudentId(null);
+            setMobileScoreDraft({});
+          }
+        }}
+        selectedRecord={selectedMobileRecord}
+        isHGClass={isHGClass}
+        selectedQuarter={selectedQuarter}
+        hgDescriptors={HG_DESCRIPTORS}
+        mobileEditorTab={mobileEditorTab}
+        onTabChange={setMobileEditorTab}
+        wwCount={wwCount}
+        ptCount={ptCount}
+        wwMeta={wwMeta}
+        ptMeta={ptMeta}
+        qaMeta={qaMeta}
+        mobileScoreDraft={mobileScoreDraft}
+        invalidCells={invalidCells}
+        getCellKey={getCellKey}
+        getMobileDraftKey={getMobileDraftKey}
+        getScoreFromGrade={(record, category, index) => computeScoreFromGrade(record, selectedQuarter, category, index)}
+        getMaxForCell={getMaxForCell}
+        onMobileScoreDraftChange={handleMobileDraftChange}
+        onMobileScoreCommit={commitMobileScore}
+        onDescriptorUpdate={handleDescriptorUpdate}
+        onApplyColumnMeta={applyColumnMetaFromMobile}
+      />
+
+      <EcrGenerationDialog
+        open={showEcrGenerationDialog}
+        percentage={ecrPercentage}
+        progress={ecrProgress}
+      />
     </div>
   );
 }

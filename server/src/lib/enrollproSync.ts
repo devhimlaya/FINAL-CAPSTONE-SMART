@@ -20,7 +20,7 @@
  */
 
 import {
-  getIntegrationV1Sections,
+  getAllIntegrationV1Sections,
   getAllIntegrationV1Learners,
   getEnrollProTeachers,
   resolveEnrollProSchoolYear,
@@ -53,8 +53,10 @@ function hashStudentFields(data: {
   middleName: string | null;
   gender: string | null;
   birthDate: Date | null;
+  address: string | null;
+  guardianName: string | null;
 }): string {
-  const raw = `${data.firstName}|${data.lastName}|${data.middleName ?? ''}|${data.gender ?? ''}|${data.birthDate?.toISOString() ?? ''}`;
+  const raw = `${data.firstName}|${data.lastName}|${data.middleName ?? ''}|${data.gender ?? ''}|${data.birthDate?.toISOString() ?? ''}|${data.address ?? ''}|${data.guardianName ?? ''}`;
   return createHash('sha256').update(raw).digest('hex').slice(0, 16);
 }
 
@@ -65,13 +67,30 @@ let syncRunning = false;
 let lastSyncAt: Date | null = null;
 let lastSyncResult: {
   advisoriesSynced: number;
+  studentsFetched: number;
   studentsSynced: number;
+  studentsSkipped: number;
+  studentsDropped: number;
   teachersMatched: number;
   errors: string[];
 } | null = null;
 
+const DELTA_SYNC_ENABLED = process.env.ENROLLPRO_DELTA_SYNC_ENABLED === 'true';
+
 export function getEnrollProSyncStatus() {
   return { syncRunning, lastSyncAt, lastSyncResult };
+}
+
+async function getLastSuccessfulSyncTimestamp(): Promise<string | undefined> {
+  if (!DELTA_SYNC_ENABLED) return undefined;
+
+  const latestSuccess = await prisma.syncHistory.findFirst({
+    where: { status: 'SUCCESS' },
+    orderBy: { completedAt: 'desc' },
+    select: { completedAt: true },
+  });
+
+  return latestSuccess?.completedAt?.toISOString();
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +108,7 @@ export async function runEnrollProSync() {
 
   const errors: string[] = [];
   let advisoriesSynced = 0;
+  let studentsFetched = 0;
   let studentsSynced = 0;
   let studentsSkipped = 0;
   let teachersMatched = 0;
@@ -126,8 +146,8 @@ export async function runEnrollProSync() {
     );
     console.log(`[EnrollProSync] Loaded ${smartTeachers.length} SMART teachers`);
 
-    // 4. Fetch all sections from EnrollPro integration v1 (no auth)
-    const epSections = await getIntegrationV1Sections(schoolYearId);
+    // 4. Fetch ALL sections from EnrollPro integration v1 (paginated — fixes 50-section cap)
+    const epSections = await getAllIntegrationV1Sections(schoolYearId);
     console.log(`[EnrollProSync] Loaded ${epSections.length} sections from EnrollPro`);
 
     // 5. Upsert ALL sections into SMART
@@ -182,8 +202,22 @@ export async function runEnrollProSync() {
     // 6. Fetch ALL enrolled learners
     console.log(`[EnrollProSync] Fetching all learners from Integration v1...`);
     let allLearners: any[] = [];
+    let updatedSince: string | undefined;
     try {
-      allLearners = await getAllIntegrationV1Learners(schoolYearId);
+      updatedSince = await getLastSuccessfulSyncTimestamp();
+      if (updatedSince) {
+        console.log(`[EnrollProSync] Delta mode enabled: updatedSince=${updatedSince}`);
+      }
+
+      try {
+        allLearners = await getAllIntegrationV1Learners(schoolYearId, updatedSince);
+      } catch (deltaError: any) {
+        if (!updatedSince) throw deltaError;
+        console.warn(`[EnrollProSync] Delta fetch failed, retrying full pull: ${deltaError.message}`);
+        updatedSince = undefined; // Force full sync flag
+        allLearners = await getAllIntegrationV1Learners(schoolYearId);
+      }
+
       console.log(`[EnrollProSync] Fetched ${allLearners.length} learners`);
     } catch (err: any) {
       errors.push(`Integration v1 learners fetch failed: ${err.message}`);
@@ -231,17 +265,22 @@ export async function runEnrollProSync() {
         // already in the DB. Skip the DB write if nothing changed — in steady state
         // this reduces upserts from ~500/cycle to only real changes (typically 0–5).
         const incomingBirthDate = learner.birthdate ? new Date(learner.birthdate) : null;
+        const incomingAddress = learner.address || record.address || record.homeAddress || record.currentAddress || null;
+        const incomingGuardian = learner.parentGuardianName || learner.guardianName || record.guardianName || record.parentGuardianName || record.guardianInfo || null;
+
         const incomingHash = hashStudentFields({
           firstName: learner.firstName,
           lastName: learner.lastName,
           middleName: learner.middleName ?? null,
           gender: learner.sex ?? null,
           birthDate: incomingBirthDate,
+          address: incomingAddress,
+          guardianName: incomingGuardian,
         });
 
         const existing = await prisma.student.findUnique({
           where: { lrn: learner.lrn },
-          select: { id: true, firstName: true, lastName: true, middleName: true, gender: true, birthDate: true },
+          select: { id: true, firstName: true, lastName: true, middleName: true, gender: true, birthDate: true, address: true, guardianName: true },
         });
 
         let studentId: string;
@@ -252,6 +291,8 @@ export async function runEnrollProSync() {
             middleName: existing.middleName,
             gender: existing.gender,
             birthDate: existing.birthDate,
+            address: existing.address,
+            guardianName: existing.guardianName,
           });
 
           if (existingHash === incomingHash) {
@@ -268,6 +309,8 @@ export async function runEnrollProSync() {
                 middleName: learner.middleName ?? null,
                 gender: learner.sex ?? null,
                 birthDate: incomingBirthDate,
+                address: incomingAddress,
+                guardianName: incomingGuardian,
               },
               select: { id: true },
             });
@@ -285,6 +328,9 @@ export async function runEnrollProSync() {
               suffix: learner.extensionName ?? null,
               gender: learner.sex ?? null,
               birthDate: incomingBirthDate,
+              address: incomingAddress,
+              guardianName: incomingGuardian,
+              guardianContact: learner.parentGuardianContact || record.contactNumber || null,
             },
             select: { id: true },
           });
@@ -324,34 +370,115 @@ export async function runEnrollProSync() {
     //    that no longer appears in the EnrollPro roster for a synced section.
     //    This keeps advisory counts accurate when students transfer or drop.
     let studentsDropped = 0;
-    for (const [sectionId, syncedStudentIds] of syncedStudentsPerSection.entries()) {
+    
+    // Only perform stale enrollment cleanup if this was a FULL sync.
+    // In a delta sync, `syncedStudentsPerSection` only contains the updated students,
+    // so running this would incorrectly drop all unmodified students in those sections.
+    if (!updatedSince) {
       try {
-        const currentlyEnrolled = await prisma.enrollment.findMany({
-          where: { sectionId, schoolYear: schoolYearLabel, status: 'ENROLLED' },
-          select: { id: true, studentId: true },
+        const allSmartSections = await prisma.section.findMany({
+          where: { schoolYear: schoolYearLabel },
+          select: { id: true, name: true },
         });
-        const toDropIds = currentlyEnrolled
-          .filter((e) => !syncedStudentIds.has(e.studentId))
-          .map((e) => e.id);
-        if (toDropIds.length > 0) {
-          await prisma.enrollment.updateMany({
-            where: { id: { in: toDropIds } },
-            data: { status: 'DROPPED' },
-          });
-          studentsDropped += toDropIds.length;
-          console.log(
-            `[EnrollProSync] Marked ${toDropIds.length} stale enrollment(s) as DROPPED for sectionId=${sectionId}`,
-          );
+
+        for (const section of allSmartSections) {
+          const sectionId = section.id;
+          const syncedStudentIds = syncedStudentsPerSection.get(sectionId) || new Set<string>();
+
+          try {
+            const currentlyEnrolled = await prisma.enrollment.findMany({
+              where: { sectionId, schoolYear: schoolYearLabel, status: 'ENROLLED' },
+              select: { id: true, studentId: true },
+            });
+            const toDropIds = currentlyEnrolled
+              .filter((e) => !syncedStudentIds.has(e.studentId))
+              .map((e) => e.id);
+            if (toDropIds.length > 0) {
+              await prisma.enrollment.updateMany({
+                where: { id: { in: toDropIds } },
+                data: { status: 'DROPPED' },
+              });
+              studentsDropped += toDropIds.length;
+              console.log(
+                `[EnrollProSync] Marked ${toDropIds.length} stale enrollment(s) as DROPPED for sectionId=${sectionId}`,
+              );
+            }
+          } catch (err: any) {
+            errors.push(`Stale enrollment cleanup sectionId=${sectionId}: ${err.message}`);
+          }
         }
       } catch (err: any) {
-        errors.push(`Stale enrollment cleanup sectionId=${sectionId}: ${err.message}`);
+        errors.push(`Stale enrollment cleanup global: ${err.message}`);
       }
-    }
-    if (studentsDropped > 0) {
-      console.log(`[EnrollProSync] Total stale enrollments marked DROPPED: ${studentsDropped}`);
+    } else {
+      console.log(`[EnrollProSync] Delta sync enabled — skipping full roster stale enrollment cleanup.`);
     }
 
-    lastSyncResult = { advisoriesSynced, studentsSynced, teachersMatched, errors };
+    // 9. Drop enrollments in orphaned sections — sections that exist in SMART DB
+    //    but no longer appear in the EnrollPro section list (e.g. deleted/renamed).
+    if (!updatedSince) {
+      const epSectionNames = new Set(epSections.map((s: any) => s.name));
+      try {
+        const allSmartSections = await prisma.section.findMany({
+          where: { schoolYear: schoolYearLabel },
+          select: { id: true, name: true },
+        });
+        const orphanedSections = allSmartSections.filter((s) => !epSectionNames.has(s.name));
+        const orphanedSectionIds = orphanedSections.map((s) => s.id);
+
+        if (orphanedSectionIds.length > 0) {
+          // A. Mark enrollments as DROPPED in these sections
+          const dropResult = await prisma.enrollment.updateMany({
+            where: {
+              sectionId: { in: orphanedSectionIds },
+              schoolYear: schoolYearLabel,
+              status: 'ENROLLED',
+            },
+            data: { status: 'DROPPED' },
+          });
+          if (dropResult.count > 0) {
+            studentsDropped += dropResult.count;
+            console.log(
+              `[EnrollProSync] Marked ${dropResult.count} enrollment(s) as DROPPED in ${orphanedSectionIds.length} orphaned section(s) not found in EnrollPro`,
+            );
+          }
+
+          // B. SAFE AUTO-DELETE: Remove sections that have NO dependencies
+          // This keeps the section list clean if they were just renamed or accidentally created,
+          // but preserves them if they have historical data (grades/attendance).
+          for (const section of orphanedSections) {
+            try {
+              const [caCount, attCount] = await Promise.all([
+                prisma.classAssignment.count({ where: { sectionId: section.id } }),
+                prisma.attendance.count({ where: { sectionId: section.id } }),
+              ]);
+
+              if (caCount === 0 && attCount === 0) {
+                // Section is safe to delete. Enrollment records will cascade delete.
+                await prisma.section.delete({ where: { id: section.id } });
+                console.log(`[EnrollProSync] Deleted orphaned section "${section.name}" (0 assignments, 0 attendance)`);
+              }
+            } catch (delErr: any) {
+              console.warn(`[EnrollProSync] Failed to delete orphaned section "${section.name}":`, delErr.message);
+            }
+          }
+        }
+      } catch (err: any) {
+        errors.push(`Orphaned section cleanup: ${err.message}`);
+      }
+    }
+
+    studentsFetched = allLearners.filter((row) => String(row?.status ?? '').toUpperCase() === 'ENROLLED').length;
+
+    lastSyncResult = {
+      advisoriesSynced,
+      studentsFetched,
+      studentsSynced,
+      studentsSkipped,
+      studentsDropped,
+      teachersMatched,
+      errors,
+    };
     lastSyncAt = new Date();
     
     // Update last sync time in settings
@@ -363,8 +490,9 @@ export async function runEnrollProSync() {
     } catch { /* ignore if settings missing */ }
 
     console.log(
-      `[EnrollProSync] ✓ Done: advisories=${advisoriesSynced}, students=${studentsSynced} updated, ` +
-      `${studentsSkipped} unchanged, matched=${teachersMatched}, errors=${errors.length}`
+      `[EnrollProSync] ✓ Done: advisories=${advisoriesSynced}, learners=${studentsFetched} fetched, ` +
+      `${studentsSynced} updated, ${studentsSkipped} unchanged, ${studentsDropped} dropped, ` +
+      `matched=${teachersMatched}, errors=${errors.length}`
     );
 
     // Notify clients that sync is complete
@@ -378,7 +506,15 @@ export async function runEnrollProSync() {
   } catch (err: any) {
     console.error('[EnrollProSync] Fatal error:', err.message);
     errors.push(`Fatal: ${err.message}`);
-    lastSyncResult = { advisoriesSynced, studentsSynced, teachersMatched, errors };
+    lastSyncResult = {
+      advisoriesSynced,
+      studentsFetched,
+      studentsSynced,
+      studentsSkipped,
+      studentsDropped: 0,
+      teachersMatched,
+      errors,
+    };
     
     // Notify clients of failure
     broadcastSyncStatus({

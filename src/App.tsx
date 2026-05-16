@@ -24,8 +24,13 @@ const AttendanceReports = lazy(() => import('./pages/teacher/AttendanceReports')
 // Registrar pages
 const RegistrarDashboard = lazy(() => import('./pages/registrar/Dashboard'))
 const StudentRecords = lazy(() => import('./pages/registrar/StudentRecords'))
-const Enrollment = lazy(() => import('./pages/registrar/Enrollment'))
 const SchoolForms = lazy(() => import('./pages/registrar/SchoolForms'))
+const ApplicationTracker = lazy(() => import('./pages/registrar/ApplicationTracker'))
+const BOSYQueue = lazy(() => import('./pages/registrar/BOSYQueue'))
+const RemedialTracker = lazy(() => import('./pages/registrar/RemedialTracker'))
+const SectionRosterViewer = lazy(() => import('./pages/registrar/SectionRosterViewer'))
+const EOSYFinalization = lazy(() => import('./pages/registrar/EOSYFinalization'))
+const TeachingLoad = lazy(() => import('./pages/registrar/TeachingLoad'))
 
 // Admin pages
 const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'))
@@ -36,6 +41,7 @@ const SystemSettings = lazy(() => import('./pages/admin/SystemSettings'))
 const TemplateManager = lazy(() => import('./pages/admin/TemplateManager'))
 const ECRTemplateManager = lazy(() => import('./pages/admin/ECRTemplateManager'))
 const ClassAssignments = lazy(() => import('./pages/admin/ClassAssignments'))
+const SystemHealth = lazy(() => import('./pages/admin/SystemHealth'))
 
 function PageLoader() {
   return (
@@ -71,8 +77,13 @@ function App() {
       <Route path="/registrar" element={<RegistrarLayout />}>
         <Route index element={<RegistrarDashboard />} />
         <Route path="students" element={<StudentRecords />} />
-        <Route path="enrollment" element={<Enrollment />} />
         <Route path="forms" element={<SchoolForms />} />
+        <Route path="applications" element={<ApplicationTracker />} />
+        <Route path="bosy" element={<BOSYQueue />} />
+        <Route path="remedial" element={<RemedialTracker />} />
+        <Route path="roster" element={<SectionRosterViewer />} />
+        <Route path="eosy" element={<EOSYFinalization />} />
+        <Route path="teaching-load" element={<TeachingLoad />} />
       </Route>
 
       {/* Admin routes */}
@@ -82,6 +93,7 @@ function App() {
         <Route path="logs" element={<AuditLogs />} />
         <Route path="grading" element={<GradingConfig />} />
         <Route path="settings" element={<SystemSettings />} />
+        <Route path="health" element={<SystemHealth />} />
         <Route path="templates" element={<TemplateManager />} />
         <Route path="ecr-templates" element={<ECRTemplateManager />} />
         <Route path="assignments" element={<ClassAssignments />} />

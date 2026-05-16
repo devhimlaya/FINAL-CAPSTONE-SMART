@@ -7,6 +7,93 @@
 
 ---
 
+## SMART Registrar API Endpoints
+
+All registrar routes require `Authorization: Bearer <token>` (REGISTRAR role unless noted).
+Base URL: `GET /api/registrar/...`
+
+### Dashboard & Sync
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/dashboard` | Dashboard stats (students, sections, sync status) |
+| GET | `/api/registrar/sync/status` | Current sync pipeline status |
+| POST | `/api/registrar/sync/run` | Manually trigger an immediate sync |
+| GET | `/api/registrar/school-years` | List of distinct school year strings in local DB |
+
+### Students & Sections
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/students` | Paginated student list with filters (`schoolYear`, `gradeLevel`, `section`, `gender`, `search`, `page`, `limit`) |
+| GET | `/api/registrar/student/:studentId` | Full student profile from local DB |
+| GET | `/api/registrar/sections` | List sections (optional: `schoolYear`, `gradeLevel`) |
+
+### School Forms (SMART local)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/forms/sf9/:studentId` | Generate SF9 learner progress report |
+| GET | `/api/registrar/forms/sf10/:studentId` | Generate SF10 permanent record |
+| GET | `/api/registrar/forms/sf8` | Generate SF8 school report |
+| GET | `/api/registrar/export/sf1/:sectionId` | Export SF1 School Register (Excel) |
+
+### Applications — EnrollPro Proxy (Phase 1)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/applications` | Enrollment applications list. Query: `status`, `gradeLevel`, `page`, `limit`. Proxied from EnrollPro with current SY. |
+
+**Response shape:**
+```json
+{ "applications": [...], "meta": { "total": 100, "page": 1, "totalPages": 5 } }
+```
+
+### BOSY Queue — EnrollPro Proxy (Phase 1)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/bosy/queue` | Learners pending BOSY confirmation. Query: `page`, `limit`. |
+| GET | `/api/registrar/bosy/expected-queue` | Prior-year promoted learners not yet in current SY pipeline. Query: `priorSchoolYearId`, `page`, `limit`. |
+
+### Remedial — EnrollPro Proxy (Phase 1)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/remedial/pending` | Learners enrolled in remedial classes. Query: `page`, `limit`. |
+
+### Section Roster — EnrollPro Proxy (Phase 1)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/section-roster/:sectionId` | All learners in a section from EnrollPro integration/v1. No-auth EnrollPro endpoint; SMART auth still required. |
+
+**Response shape:**
+```json
+{ "section": { "id": 1, "name": "Grade 7 – Narra" }, "learners": [...], "total": 45 }
+```
+
+### EOSY (End of School Year) — EnrollPro Proxy (Phase 2, READ-ONLY)
+> ⚠️ Finalization (`POST /eosy/sections/:id/finalize`) is NOT implemented in SMART. Finalization must be done in EnrollPro directly.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/eosy/sections` | Sections available for EOSY processing |
+| GET | `/api/registrar/eosy/sections/:sectionId/records` | Final grades + promotion status for a section |
+| GET | `/api/registrar/eosy/sections/:sectionId/sf5` | SF5 section promotion report (JSON from EnrollPro) |
+| GET | `/api/registrar/eosy/sf6` | SF6 school-wide EOSY enrollment summary |
+
+### ATLAS Teaching Load (Phase 3, READ-ONLY)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/registrar/atlas/teaching-loads` | Faculty teaching load summary. Optional: `atlasSchoolYearId`. |
+| GET | `/api/registrar/atlas/subject-coverage` | Subject assignment coverage (`count`, `unassignedCount`, `unassigned[]`). |
+
+**Teaching load response:**
+```json
+{ "faculty": [{ "facultyId": 1, "name": "Reyes, Maria", "assignedSubjects": [...], "totalMinutesPerWeek": 300 }] }
+```
+
+**Subject coverage response:**
+```json
+{ "count": 40, "unassignedCount": 3, "unassigned": [{ "id": 7, "code": "SCI7", "name": "Science 7" }] }
+```
+
+---
+
 ## ⚠️ Current Status (Updated: 2026-04-17)
 
 **Team Systems Identified (All on port 3000):**
@@ -25,6 +112,128 @@
 ---
 
 ## 🔵 APIs YOU PROVIDE (Other teams can call these)
+
+### Admin Login Immediate Sync
+```
+POST /api/auth/login
+```
+
+**Behavior update:** On successful `ADMIN` login, SMART now triggers a non-blocking unified sync (`admin_login`) so dashboard data refresh starts immediately instead of waiting for the next scheduled cycle.
+
+### Admin System Health Pulse
+```
+GET /api/admin/system/health
+```
+
+**Purpose:** Comprehensive health snapshot for SMART runtime plus companion systems.
+
+**Auth:** Admin only.
+
+**Includes:**
+- Local server metrics (`uptimeSeconds`, `process.memoryUsage()`)
+- Prisma DB connectivity probe (`SELECT 1`)
+- EnrollPro connectivity (`/integration/v1/health`)
+- Atlas connectivity (`/health`)
+- AIMS connectivity (`/health`)
+- Unified sync coordinator state + circuit breaker status
+- Recent persistent sync history records
+
+**Sample response (abridged):**
+```json
+{
+  "status": "HEALTHY",
+  "timestamp": "2026-05-15T08:15:30.000Z",
+  "local": {
+    "uptimeSeconds": 842,
+    "memory": { "rss": 0, "heapTotal": 0, "heapUsed": 0, "external": 0 },
+    "database": { "online": true, "latencyMs": 3 }
+  },
+  "external": {
+    "enrollpro": { "online": true, "httpStatus": 200, "status": "HEALTHY" },
+    "atlas": { "online": true, "httpStatus": 200, "status": "HEALTHY" },
+    "aims": { "online": true, "httpStatus": 200, "status": "HEALTHY" }
+  },
+  "sync": {
+    "coordinator": {},
+    "circuitBreaker": { "open": false },
+    "recentHistory": []
+  }
+}
+```
+
+### Admin Sync History (Persistent)
+```
+GET /api/admin/system/sync-history?limit=25
+```
+
+**Purpose:** Retrieve persisted sync attempts (success, failed, skipped) for diagnostics and audit.
+
+**Auth:** Admin only.
+
+### Admin Diagnostics Sync Trigger
+```
+POST /api/admin/system/sync/run
+```
+
+**Purpose:** Manually run unified sync from diagnostics UI.
+
+**Auth:** Admin only.
+
+### Registrar Login Immediate Sync
+```
+POST /api/auth/login
+```
+
+**Behavior update:** On successful `REGISTRAR` login, SMART now triggers a non-blocking unified sync (`registrar_login`) so registrar masterlist data refresh starts immediately.
+
+### Registrar Dashboard (Real-Time Student Count)
+```
+GET /api/registrar/dashboard
+```
+
+**Purpose:** Registrar dashboard metrics with real-time EnrollPro top-level student count.
+
+**Auth:** Registrar only.
+
+**Behavior:**
+- Attempts real-time count from EnrollPro integration (`meta.total` from learners endpoint with `limit=1`)
+- Attempts real-time section totals from EnrollPro integration (`/integration/v1/sections`)
+- Falls back to SMART local DB count if EnrollPro is unavailable
+- Uses SMART local DB for grade/gender distribution to avoid expensive full EnrollPro learner pulls on each dashboard visit
+- If sync freshness is stale (`>10` minutes), queues a non-blocking sync trigger (`registrar_page_load`)
+- Returns `totalStudentsSource` so UI can display source transparency
+- Includes sync freshness and data completeness warning totals
+
+### Registrar Student Masterlist (Synced Snapshot)
+```
+GET /api/registrar/students
+```
+
+**Purpose:** Returns registrar student records from SMART local synced data for fast filtering and stable performance.
+
+**Auth:** Registrar only.
+
+**Notes:**
+- Source is SMART local DB (`source: smart-db-fallback`) fed by unified EnrollPro sync.
+- Real-time EnrollPro full-learner mode is intentionally disabled to prevent dashboard/masterlist lag.
+
+### Registrar Force Sync
+```
+POST /api/registrar/sync/run
+```
+
+**Purpose:** Manually queue immediate unified sync from registrar UI.
+
+**Auth:** Registrar only.
+
+### Registrar Sync Status
+```
+GET /api/registrar/sync/status
+```
+
+**Purpose:** Returns sync freshness badge data (`lastSyncedAt`, minutes since sync, stale/fresh state, running flag).
+
+**Auth:** Registrar only.
 
 ### Admin Dashboard Stats
 ```

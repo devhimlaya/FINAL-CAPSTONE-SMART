@@ -4,7 +4,7 @@ import { runAtlasSync } from '../lib/atlasSync';
 import {
   getAllIntegrationV1Learners,
   getAllIntegrationV1SectionLearners,
-  getIntegrationV1Sections,
+  getAllIntegrationV1Sections,
   getEnrollProTeachers,
   resolveEnrollProSchoolYear,
 } from '../lib/enrollproClient';
@@ -377,13 +377,13 @@ export async function syncEnrollmentsFromEnrollProForSchoolYear(schoolYear: stri
   const resolvedSY = await resolveEnrollProSchoolYear(schoolYear);
   let sections: any[] = [];
   try {
-    sections = await getIntegrationV1Sections(resolvedSY.id);
+    sections = await getAllIntegrationV1Sections(resolvedSY.id);
   } catch (error: any) {
     console.error(`[sync] EnrollPro sections fetch failed: ${error?.message ?? error}`);
   }
 
   if (sections.length === 0) {
-    sections = await getIntegrationV1Sections();
+    sections = await getAllIntegrationV1Sections();
   }
 
   if (!sections) return { synced: 0, errors: 1, skipped: 0 };
@@ -551,7 +551,7 @@ export async function syncClassAssignmentsFromAtlasForSchoolYear(schoolYear: str
 
       for (const assignment of items) {
         if (assignment?.subjectCode || assignment?.sectionId) {
-          const epSection = assignment?.sectionId ? (await getIntegrationV1Sections(resolvedSY.id)).find((section) => Number(section.id) === Number(assignment.sectionId)) : null;
+          const epSection = assignment?.sectionId ? (await getAllIntegrationV1Sections(resolvedSY.id)).find((section) => Number(section.id) === Number(assignment.sectionId)) : null;
           if (!epSection) continue;
           flattened.push({
             employeeId: faculty?.externalId ?? faculty?.employeeId ?? faculty?.contactInfo,

@@ -11,12 +11,21 @@ import {
   LayoutGrid,
   List,
   Search,
+  Trash2,
   Users,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { gradesApi, type ClassAssignment } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useSyncStream } from "@/hooks/useSyncStream";
@@ -28,11 +37,56 @@ const gradeLevelLabels: Record<string, string> = {
   GRADE_10: "Grade 10",
 };
 
-function AssignmentCard({ assignment, archived }: { assignment: ClassAssignment; archived: boolean }) {
+function getGradeColors(gradeLevel: string) {
+  switch (gradeLevel) {
+    case "GRADE_7": return { 
+      badge: "bg-emerald-50 text-emerald-700 border-emerald-100", 
+      circle: "bg-emerald-400",
+      decor: "bg-emerald-50/50 group-hover:bg-emerald-50",
+      button: "bg-emerald-50 text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white"
+    };
+    case "GRADE_8": return { 
+      badge: "bg-amber-50 text-amber-700 border-amber-100", 
+      circle: "bg-amber-400",
+      decor: "bg-amber-50/50 group-hover:bg-amber-50",
+      button: "bg-amber-50 text-amber-400 group-hover:bg-amber-600 group-hover:text-white"
+    };
+    case "GRADE_9": return { 
+      badge: "bg-rose-50 text-rose-700 border-rose-100", 
+      circle: "bg-rose-400",
+      decor: "bg-rose-50/50 group-hover:bg-rose-50",
+      button: "bg-rose-50 text-rose-400 group-hover:bg-rose-600 group-hover:text-white"
+    };
+    case "GRADE_10": return { 
+      badge: "bg-blue-50 text-blue-700 border-blue-100", 
+      circle: "bg-blue-400",
+      decor: "bg-blue-50/50 group-hover:bg-blue-50",
+      button: "bg-blue-50 text-blue-400 group-hover:bg-blue-600 group-hover:text-white"
+    };
+    default: return { 
+      badge: "bg-indigo-50 text-indigo-700 border-indigo-100", 
+      circle: "bg-indigo-400",
+      decor: "bg-indigo-50/50 group-hover:bg-indigo-50",
+      button: "bg-indigo-50 text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white"
+    };
+  }
+}
+
+function AssignmentCard({ 
+  assignment, 
+  archived,
+  onDelete 
+}: { 
+  assignment: ClassAssignment; 
+  archived: boolean;
+  onDelete?: (id: string, name: string) => void;
+}) {
   const titleHover = archived ? "group-hover:text-rose-600" : "group-hover:text-indigo-600";
+  const colors = getGradeColors(assignment.section.gradeLevel);
   const badgeClass = archived
     ? "bg-rose-100 text-rose-700 border-rose-200"
-    : "bg-indigo-50 text-indigo-700 border-indigo-100";
+    : colors.badge;
+  const circleClass = archived ? "bg-rose-400" : colors.circle;
   const containerClass = archived
     ? "border border-rose-200 shadow-xl shadow-rose-100/50 hover:shadow-2xl hover:shadow-rose-200"
     : "border-0 shadow-xl shadow-slate-200/50 hover:shadow-2xl hover:shadow-indigo-100";
@@ -47,77 +101,93 @@ function AssignmentCard({ assignment, archived }: { assignment: ClassAssignment;
     : "w-12 h-12 rounded-2xl bg-slate-50 text-slate-300";
 
   return (
-    <Link to={`/teacher/records/${assignment.id}`} className="animate-slide-up group block h-full">
-      <Card className={`h-full ${containerClass} transition-all duration-500 ${archived ? 'rounded-[2rem]' : 'rounded-[2.5rem]'} ${cardBg} overflow-hidden flex flex-col relative group-hover:-translate-y-2`}>
-        <div
-          className={
-            archived
-              ? "absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-bl-[3rem] -mr-8 -mt-8 group-hover:bg-rose-100 transition-colors"
-              : "absolute top-0 right-0 w-32 h-32 bg-slate-50 rounded-bl-[4rem] -mr-10 -mt-10 group-hover:bg-indigo-50 transition-colors"
-          }
-        />
-        <CardHeader className={`${archived ? 'p-6 pb-3' : 'p-8 pb-4'} relative z-10`}>
-          <div className={`flex items-start justify-between ${archived ? 'mb-4' : 'mb-8'}`}>
-            <Badge className={`${badgeClass} text-[10px] font-black uppercase tracking-[0.1em] ${archived ? 'px-3 py-1' : 'px-4 py-1.5'} rounded-full`}>
-              {archived ? "ARCHIVED" : gradeLevelLabels[assignment.section.gradeLevel]}
-            </Badge>
-            <div className={`${archived ? 'w-8 h-8 rounded-lg' : 'w-10 h-10 rounded-xl'} ${archived ? "bg-rose-50 text-rose-500 group-hover:bg-rose-600 group-hover:text-white" : "bg-slate-50 text-slate-300 group-hover:bg-indigo-600 group-hover:text-white"} flex items-center justify-center transition-all duration-500 shadow-sm`}>
-              <ArrowUpRight className={`${archived ? 'w-4 h-4' : 'w-5 h-5'}`} />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <p className={`text-[10px] font-black uppercase tracking-[0.2em] ${mutedText}`}>Subject Title</p>
-            <h3 className={`${archived ? 'text-lg' : 'text-2xl'} font-black text-slate-900 ${titleHover} transition-colors leading-tight`}>
-              {assignment.subject.name}
-            </h3>
-          </div>
-
-          <div className={`${archived ? 'pt-3' : 'pt-4'} flex items-center gap-2`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${archived ? "bg-rose-400" : "bg-emerald-400"} animate-pulse`} />
-            <p className={`${archived ? 'text-xs' : 'text-sm'} font-bold ${sectionText}`}>
-              Section {assignment.section.name} &bull; {assignment.schoolYear}
-            </p>
-          </div>
-
-          {archived && assignment.archivedReason && (
-            <p className="mt-3 text-[10px] font-bold text-rose-600 bg-rose-50 rounded-xl px-3 py-2 border border-rose-100 leading-relaxed line-clamp-2">
-              {assignment.archivedReason}
-            </p>
-          )}
-        </CardHeader>
-
-        <CardContent className={`${archived ? 'p-6 pt-4' : 'p-8 pt-6'} mt-auto relative z-10`}>
-          <div className={`flex items-center justify-between ${archived ? 'pt-4' : 'pt-6'} border-t ${archived ? "border-rose-100" : "border-slate-50"}`}>
-            <div className={`flex items-center ${archived ? 'gap-2' : 'gap-3'}`}>
-              <div className={`${iconClass} flex items-center justify-center transition-colors shadow-sm`}>
-                <Users className={`${archived ? 'w-4 h-4' : 'w-5 h-5'}`} />
-              </div>
-              <div>
-                <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Enrolled</p>
-                <p className={`${archived ? 'text-xs' : 'text-sm'} font-black text-slate-900`}>{assignment.section.enrollments?.length || 0} Learners</p>
+    <div className="relative group/card h-full">
+      <Link to={`/teacher/records/${assignment.id}`} className="animate-slide-up group block h-full">
+        <Card className={`h-full ${containerClass} transition-all duration-500 ${archived ? 'rounded-[2rem]' : 'rounded-[2.5rem]'} ${cardBg} overflow-hidden flex flex-col relative group-hover:-translate-y-2`}>
+          <div
+            className={
+              archived
+                ? "absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-bl-[3rem] -mr-8 -mt-8 group-hover:bg-rose-100 transition-colors"
+                : `absolute top-0 right-0 w-32 h-32 ${colors.decor} rounded-bl-[4rem] -mr-10 -mt-10 transition-colors`
+            }
+          />
+          <CardHeader className={`${archived ? 'p-6 pb-3' : 'p-8 pb-4'} relative z-10`}>
+            <div className={`flex items-start justify-between ${archived ? 'mb-4' : 'mb-8'}`}>
+              <Badge className={`${badgeClass} text-[10px] font-black uppercase tracking-[0.1em] ${archived ? 'px-3 py-1' : 'px-4 py-1.5'} rounded-full`}>
+                {archived ? "ARCHIVED" : gradeLevelLabels[assignment.section.gradeLevel]}
+              </Badge>
+              <div className={`${archived ? 'w-8 h-8 rounded-lg' : 'w-10 h-10 rounded-xl'} ${archived ? "bg-rose-50 text-rose-500 group-hover:bg-rose-600 group-hover:text-white" : colors.button} flex items-center justify-center transition-all duration-500 shadow-sm`}>
+                <ArrowUpRight className={`${archived ? 'w-4 h-4' : 'w-5 h-5'}`} />
               </div>
             </div>
 
-            <div className="text-right">
-              <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Weights</p>
-              <p className={`${archived ? 'text-[10px]' : 'text-xs'} font-black text-slate-900 font-mono tracking-tighter`}>
-                {assignment.subject.writtenWorkWeight}/{assignment.subject.perfTaskWeight}/{assignment.subject.quarterlyAssessWeight}
+            <div className="space-y-1">
+              <p className={`text-[10px] font-black uppercase tracking-[0.2em] ${mutedText}`}>Subject Title</p>
+              <h3 className={`${archived ? 'text-lg' : 'text-2xl'} font-black text-slate-900 ${titleHover} transition-colors leading-tight`}>
+                {assignment.subject.name}
+              </h3>
+            </div>
+
+            <div className={`${archived ? 'pt-3' : 'pt-4'} flex items-center gap-2`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${circleClass} animate-pulse`} />
+              <p className={`${archived ? 'text-xs' : 'text-sm'} font-bold ${sectionText}`}>
+                Section {assignment.section.name} &bull; {assignment.schoolYear}
               </p>
             </div>
-          </div>
 
-          <div className={`${archived ? 'mt-3' : 'mt-4'} flex items-center justify-between`}>
-            <Badge className={`${archived ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-slate-100 text-slate-500 border-0"} text-[10px] font-black uppercase tracking-widest ${archived ? 'px-2' : 'px-3'}`}>
-              {archived ? "Backup" : "Active Record"}
-            </Badge>
-            <div className={`${chevronClass} flex items-center justify-center transition-all group-hover:translate-x-2`}>
-              <ChevronRight className={`${archived ? 'w-5 h-5' : 'w-6 h-6'}`} />
+            {archived && assignment.archivedReason && (
+              <p className="mt-3 text-[10px] font-bold text-rose-600 bg-rose-50 rounded-xl px-3 py-2 border border-rose-100 leading-relaxed line-clamp-2">
+                {assignment.archivedReason}
+              </p>
+            )}
+          </CardHeader>
+
+          <CardContent className={`${archived ? 'p-6 pt-4' : 'p-8 pt-6'} mt-auto relative z-10`}>
+            <div className={`flex items-center justify-between ${archived ? 'pt-4' : 'pt-6'} border-t ${archived ? "border-rose-100" : "border-slate-50"}`}>
+              <div className={`flex items-center ${archived ? 'gap-2' : 'gap-3'}`}>
+                <div className={`${iconClass} flex items-center justify-center transition-colors shadow-sm`}>
+                  <Users className={`${archived ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                </div>
+                <div>
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Enrolled</p>
+                  <p className={`${archived ? 'text-xs' : 'text-sm'} font-black text-slate-900`}>{assignment.section.enrollments?.length || 0} Learners</p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <p className={`text-[10px] font-black uppercase tracking-widest ${mutedText}`}>Weights</p>
+                <p className={`${archived ? 'text-[10px]' : 'text-xs'} font-black text-slate-900 font-mono tracking-tighter`}>
+                  {assignment.subject.writtenWorkWeight}/{assignment.subject.perfTaskWeight}/{assignment.subject.quarterlyAssessWeight}
+                </p>
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+
+            <div className={`${archived ? 'mt-3' : 'mt-4'} flex items-center justify-between`}>
+              <Badge className={`${archived ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-slate-100 text-slate-500 border-0"} text-[10px] font-black uppercase tracking-widest ${archived ? 'px-2' : 'px-3'}`}>
+                {archived ? "Backup" : "Active Record"}
+              </Badge>
+              <div className={`${chevronClass} flex items-center justify-center transition-all group-hover:translate-x-2`}>
+                <ChevronRight className={`${archived ? 'w-5 h-5' : 'w-6 h-6'}`} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+      {archived && onDelete && (
+        <Button
+          variant="destructive"
+          size="icon"
+          className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-rose-600 text-white shadow-lg opacity-0 group-hover/card:opacity-100 transition-all z-20 hover:scale-110 active:scale-95"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onDelete(assignment.id, assignment.subject.name);
+          }}
+        >
+          <Trash2 className="w-5 h-5" />
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -129,6 +199,8 @@ export default function ClassRecordsList() {
   const [searchTerm, setSearchTerm] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isArchivedExpanded, setIsArchivedExpanded] = useState(false);
+  const [assignmentToDelete, setAssignmentToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const fetchClasses = async () => {
@@ -144,6 +216,21 @@ export default function ClassRecordsList() {
 
     fetchClasses();
   }, [syncVersion]);
+
+  const handleDelete = async () => {
+    if (!assignmentToDelete) return;
+    setIsDeleting(true);
+    try {
+      await gradesApi.deleteClassAssignment(assignmentToDelete.id);
+      setClasses(classes.filter((c) => c.id !== assignmentToDelete.id));
+      setAssignmentToDelete(null);
+    } catch (err) {
+      console.error("Failed to delete class:", err);
+      alert("Failed to delete class record. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const filteredClasses = classes.filter(
     (c) =>
@@ -282,7 +369,7 @@ export default function ClassRecordsList() {
                   <div className="flex overflow-x-auto pb-8 pt-2 gap-6 rose-scrollbar snap-x snap-mandatory">
                     {archivedClasses.map((assignment) => (
                       <div key={assignment.id} className="w-[320px] shrink-0 snap-start">
-                        <AssignmentCard assignment={assignment} archived />
+                        <AssignmentCard assignment={assignment} archived onDelete={(id, name) => setAssignmentToDelete({ id, name })} />
                       </div>
                     ))}
                   </div>
@@ -310,7 +397,7 @@ export default function ClassRecordsList() {
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-3 mb-2">
                           <h3 className="text-xl font-black text-slate-900 group-hover:text-indigo-600 transition-colors">{assignment.subject.name}</h3>
-                          <Badge className="bg-slate-100 text-slate-500 border-0 text-[10px] font-black uppercase tracking-widest px-3">
+                          <Badge className={`${getGradeColors(assignment.section.gradeLevel).badge} border-0 text-[10px] font-black uppercase tracking-widest px-3`}>
                             {gradeLevelLabels[assignment.section.gradeLevel]}
                           </Badge>
                         </div>
@@ -412,8 +499,22 @@ export default function ClassRecordsList() {
                               </div>
                             </div>
 
-                            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-400 flex items-center justify-center group-hover:translate-x-2 transition-all">
-                              <ChevronRight className="w-6 h-6" />
+                            <div className="flex items-center gap-4">
+                              <Button
+                                variant="destructive"
+                                size="icon"
+                                className="w-12 h-12 rounded-2xl bg-rose-600 text-white opacity-0 group-hover:opacity-100 transition-all shadow-lg shadow-rose-100 hover:scale-110 active:scale-95"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setAssignmentToDelete({ id: assignment.id, name: assignment.subject.name });
+                                }}
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </Button>
+                              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-400 flex items-center justify-center group-hover:translate-x-2 transition-all">
+                                <ChevronRight className="w-6 h-6" />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -442,6 +543,47 @@ export default function ClassRecordsList() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={!!assignmentToDelete} onOpenChange={(open) => !open && setAssignmentToDelete(null)}>
+        <DialogContent className="rounded-[2rem] border-0 shadow-2xl p-0 overflow-hidden max-w-md">
+          <div className="bg-rose-600 p-8 text-white">
+            <div className="w-16 h-16 bg-white/20 rounded-[1.5rem] flex items-center justify-center mb-6 backdrop-blur-md">
+              <Trash2 className="w-8 h-8 text-white" />
+            </div>
+            <DialogHeader className="p-0 text-left">
+              <DialogTitle className="text-2xl font-black text-white leading-tight">Are You sure to delete this Subject?</DialogTitle>
+              <DialogDescription className="text-rose-100 font-medium text-base mt-2">
+                Permanently removing <span className="font-black text-white underline decoration-2 underline-offset-4">{assignmentToDelete?.name}</span> will erase all student grades and synchronization history for this record.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <DialogFooter className="p-8 bg-white flex flex-col sm:flex-row gap-4">
+            <Button
+              variant="outline"
+              onClick={() => setAssignmentToDelete(null)}
+              className="h-14 rounded-2xl border-slate-200 font-bold hover:bg-slate-50 hover:text-slate-900 transition-all flex-1"
+              disabled={isDeleting}
+            >
+              CANCEL
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              className="h-14 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-black shadow-xl shadow-rose-100 transition-all flex-1"
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                "DELETING..."
+              ) : (
+                <div className="flex items-center justify-center gap-2">
+                  <Trash2 className="w-5 h-5" />
+                  <span>YES, DELETE RECORD</span>
+                </div>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

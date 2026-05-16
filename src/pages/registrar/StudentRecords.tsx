@@ -8,6 +8,14 @@ import {
   FolderOpen,
   Loader2,
   Command,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  FileCheck,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -37,8 +45,8 @@ import {
 import { registrarApi, type Section } from "@/lib/api";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Tooltip, HelpTooltip } from "@/components/ui/tooltip";
-import { Pagination } from "@/components/ui/pagination";
 import { useTheme } from "@/contexts/ThemeContext";
+import { useSyncStream } from "@/hooks/useSyncStream";
 
 // Extended student type that includes enrollment data
 interface StudentWithEnrollment {
@@ -87,10 +95,42 @@ const formatDate = (dateString?: string) => {
   }
 };
 
+// Helper component for Form Status
+const FormStatusCard = ({ label, title, status, description }: { 
+  label: string; 
+  title: string; 
+  status: 'completed' | 'pending' | 'missing' | 'dev'; 
+  description: string 
+}) => {
+  const statusConfig = {
+    completed: { icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'Ready' },
+    pending: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', text: 'In Progress' },
+    missing: { icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', text: 'Missing Data' },
+    dev: { icon: Loader2, color: 'text-gray-400', bg: 'bg-gray-50', border: 'border-gray-200', text: 'In Dev' },
+  };
+
+  const config = statusConfig[status];
+  const Icon = config.icon;
+
+  return (
+    <div className={`p-3 rounded-xl border-2 ${config.bg} ${config.border} transition-all ${status === 'dev' ? 'opacity-70 grayscale-[0.5]' : ''}`}>
+      <div className="flex items-center justify-between mb-1">
+        <Badge variant="outline" className={`${config.color} ${config.border} bg-white px-1.5 text-[10px]`}>{label}</Badge>
+        <Icon className={`w-4 h-4 ${config.color} ${status === 'dev' ? 'animate-spin-slow' : ''}`} />
+      </div>
+      <p className="font-bold text-gray-900 text-[11px] truncate leading-tight" title={title}>{title}</p>
+      <div className="mt-1">
+        <span className={`text-[9px] font-bold uppercase tracking-wider ${config.color}`}>{config.text}</span>
+      </div>
+    </div>
+  );
+};
+
 export default function StudentRecords() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { colors } = useTheme();
+  const { syncVersion } = useSyncStream();
   const [students, setStudents] = useState<StudentWithEnrollment[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -98,6 +138,9 @@ export default function StudentRecords() {
   const [selectedGradeLevel, setSelectedGradeLevel] = useState("all");
   const [selectedSection, setSelectedSection] = useState("all");
   
+  // School years from API
+  const [schoolYears, setSchoolYears] = useState<string[]>(["2026-2027"]);
+
   // Student detail modal
   const [selectedStudent, setSelectedStudent] = useState<StudentWithEnrollment | null>(null);
   const [studentDetailOpen, setStudentDetailOpen] = useState(false);
@@ -107,7 +150,7 @@ export default function StudentRecords() {
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 15;
+  const [limit, setLimit] = useState(50);
   
   // Search input ref for keyboard shortcut
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -127,9 +170,23 @@ export default function StudentRecords() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, selectedGradeLevel, selectedSection, selectedSchoolYear]);
+  }, [searchQuery, selectedGradeLevel, selectedSection, selectedSchoolYear, limit]);
 
-  // Load data
+  // Load school years once on mount
+  useEffect(() => {
+    registrarApi.getSchoolYears().then((res) => {
+      const sysYears = res.data.schoolYears;
+      if (Array.isArray(sysYears) && sysYears.length > 0) {
+        setSchoolYears(sysYears);
+        // Set default to the first one (most recent) if not already set or matches default
+        if (selectedSchoolYear === "2026-2027" && sysYears[0] !== "2026-2027") {
+          setSelectedSchoolYear(sysYears[0]);
+        }
+      }
+    }).catch(() => { /* keep defaults */ });
+  }, []);
+
+  // Load data and refresh again whenever a background sync completes.
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -159,7 +216,7 @@ export default function StudentRecords() {
       }
     };
     loadData();
-  }, [selectedSchoolYear]);
+  }, [selectedSchoolYear, syncVersion]);
 
   // Filter students
   const filteredStudents = students.filter((student) => {
@@ -198,19 +255,40 @@ export default function StudentRecords() {
     }
   };
 
-  // Stats calculations
+  // Stats calculations (case-insensitive gender match — DB stores MALE/FEMALE from EnrollPro)
   const stats = {
     total: filteredStudents.length,
-    male: filteredStudents.filter((s) => s.gender === "Male").length,
-    female: filteredStudents.filter((s) => s.gender === "Female").length,
-    sections: new Set(filteredStudents.map((s) => s.sectionId).filter(Boolean)).size,
+    male: filteredStudents.filter((s) => {
+      const g = (s.gender || "").toUpperCase();
+      return g === "MALE" || g === "M";
+    }).length,
+    female: filteredStudents.filter((s) => {
+      const g = (s.gender || "").toUpperCase();
+      return g === "FEMALE" || g === "F";
+    }).length,
+    sections: searchQuery 
+      ? new Set(filteredStudents.map((s) => s.sectionId).filter(Boolean)).size
+      : sections.filter(s => {
+          const normalizedGrade = s.gradeLevel.replace("GRADE_", "");
+          const matchesGrade = selectedGradeLevel === "all" || normalizedGrade === selectedGradeLevel;
+          const matchesSection = selectedSection === "all" || s.id === selectedSection;
+          
+          if (!matchesGrade || !matchesSection) return false;
+          
+          // A section is "valid" if it either exists in EnrollPro (matching the dashboard's 66 count)
+          // or it has active enrolled students in our local database.
+          const isFromEnrollPro = s.enrollProId !== null;
+          const hasEnrolledStudents = students.some(st => st.sectionId === s.id);
+          
+          return isFromEnrollPro || hasEnrolledStudents;
+        }).length,
   };
   
   // Pagination calculations
-  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredStudents.length / limit));
   const paginatedStudents = filteredStudents.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    (currentPage - 1) * limit,
+    currentPage * limit
   );
 
   if (loading) {
@@ -310,9 +388,9 @@ export default function StudentRecords() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="2026-2027">2026-2027</SelectItem>
-                  <SelectItem value="2025-2026">2025-2026</SelectItem>
-                  <SelectItem value="2024-2025">2024-2025</SelectItem>
+                  {schoolYears.map((sy) => (
+                    <SelectItem key={sy} value={sy}>{sy}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <div className="relative">
@@ -350,11 +428,14 @@ export default function StudentRecords() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Sections</SelectItem>
-                  {sections.map((section) => (
-                    <SelectItem key={section.id} value={section.id}>
-                      {section.name} ({section.gradeLevel.replace("GRADE_", "Grade ")})
-                    </SelectItem>
-                  ))}
+                  {sections
+                    .filter(s => s.enrollProId !== null || students.some(st => st.sectionId === s.id))
+                    .map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.name} ({section.gradeLevel.replace("GRADE_", "Grade ")})
+                      </SelectItem>
+                    ))
+                  }
                 </SelectContent>
               </Select>
             </div>
@@ -410,7 +491,7 @@ export default function StudentRecords() {
                           </Button>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <Badge className={student.gender === "Male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}>
+                          <Badge className={student.gender?.toUpperCase() === "MALE" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}>
                             {student.gender}
                           </Badge>
                           <Badge style={{ backgroundColor: `${colors.primary}15`, color: colors.primary }}>
@@ -474,7 +555,7 @@ export default function StudentRecords() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={student.gender === "Male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}>
+                          <Badge className={student.gender?.toUpperCase() === "MALE" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}>
                             {student.gender}
                           </Badge>
                         </TableCell>
@@ -516,14 +597,77 @@ export default function StudentRecords() {
           
           {/* Pagination */}
           {!loading && filteredStudents.length > 0 && (
-            <div className="border-t border-gray-100 px-6 py-4">
-              <Pagination
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageChange={setCurrentPage}
-                totalItems={filteredStudents.length}
-                itemsPerPage={itemsPerPage}
-              />
+            <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between bg-gray-50/30">
+              <div className="flex items-center gap-4 text-sm font-semibold text-slate-800">
+                <span>
+                  Showing {filteredStudents.length === 0 ? 0 : (currentPage - 1) * limit + 1} to {Math.min(currentPage * limit, filteredStudents.length)} of {filteredStudents.length} Learners
+                </span>
+                <div className="h-4 w-px bg-slate-300 mx-2" />
+                <div className="flex items-center gap-2">
+                  <span>Rows per page:</span>
+                  <Select value={String(limit)} onValueChange={(v) => setLimit(Number(v))}>
+                    <SelectTrigger className="h-9 w-20 rounded-lg border-slate-200 bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="250">250</SelectItem>
+                      <SelectItem value="500">500</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-400"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-400"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => p - 1)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="h-9 w-9 rounded-lg bg-[#800000] hover:bg-[#600000] text-white font-bold shadow-sm"
+                >
+                  {currentPage}
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-400"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => p + 1)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-400"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -542,24 +686,130 @@ export default function StudentRecords() {
           {selectedStudent && (
             <div className="space-y-6 sm:space-y-8">
               {/* Student Info */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-5">
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 p-4 sm:p-5 md:p-6 rounded-xl border-2 border-blue-200 shadow-sm">
-                  <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1 sm:mb-2">LRN</p>
-                  <p className="font-mono font-bold text-gray-900 text-base sm:text-lg break-all">{selectedStudent.lrn}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+                <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 p-4 rounded-xl border-2 border-blue-200 shadow-sm">
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">LRN</p>
+                  <p className="font-mono font-bold text-gray-900 text-sm break-all">{selectedStudent.lrn}</p>
                 </div>
-                <div className="p-4 sm:p-5 md:p-6 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.primary}08`, borderColor: `${colors.primary}30` }}>
-                  <p className="text-xs font-bold uppercase tracking-wider mb-1 sm:mb-2" style={{ color: colors.primary }}>Name</p>
-                  <p className="font-bold text-gray-900 text-sm sm:text-base leading-tight">
-                    {selectedStudent.lastName}, {selectedStudent.firstName} {selectedStudent.middleName || ""}
+                <div className="p-4 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.primary}08`, borderColor: `${colors.primary}30` }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.primary }}>Name</p>
+                  <p className="font-bold text-gray-900 text-sm leading-tight truncate" title={`${selectedStudent.lastName}, ${selectedStudent.firstName}`}>
+                    {selectedStudent.lastName}, {selectedStudent.firstName}
                   </p>
                 </div>
-                <div className="p-4 sm:p-5 md:p-6 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.secondary}08`, borderColor: `${colors.secondary}30` }}>
-                  <p className="text-xs font-bold uppercase tracking-wider mb-1 sm:mb-2" style={{ color: colors.secondary }}>Gender</p>
-                  <p className="font-bold text-gray-900 text-base sm:text-lg">{selectedStudent.gender || "-"}</p>
+                <div className="p-4 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.secondary}08`, borderColor: `${colors.secondary}30` }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.secondary }}>Gender</p>
+                  <p className="font-bold text-gray-900 text-sm">{selectedStudent.gender || "-"}</p>
                 </div>
-                <div className="p-4 sm:p-5 md:p-6 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.accent}08`, borderColor: `${colors.accent}30` }}>
-                  <p className="text-xs font-bold uppercase tracking-wider mb-1 sm:mb-2" style={{ color: colors.accent }}>Birth Date</p>
-                  <p className="font-bold text-gray-900 text-sm">{formatDate(selectedStudent.birthDate)}</p>
+                <div className="p-4 rounded-xl border-2 shadow-sm" style={{ backgroundColor: `${colors.accent}08`, borderColor: `${colors.accent}30` }}>
+                  <p className="text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: colors.accent }}>Birth Date</p>
+                  <p className="font-bold text-gray-900 text-xs">{formatDate(selectedStudent.birthDate)}</p>
+                </div>
+                <div className="p-4 rounded-xl border-2 shadow-sm bg-gray-50 border-gray-200">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Guardian</p>
+                  <p className={`font-bold text-sm ${!selectedStudent.guardianName ? 'text-red-400 italic font-normal' : 'text-gray-900'}`}>
+                    {selectedStudent.guardianName || "Not Set"}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl border-2 shadow-sm bg-gray-50 border-gray-200">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Address</p>
+                  <p className={`font-bold text-xs leading-tight line-clamp-2 ${!selectedStudent.address ? 'text-red-400 italic font-normal' : 'text-gray-900'}`} title={selectedStudent.address}>
+                    {selectedStudent.address || "No address on record"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Data Completeness Alert (What's needing) */}
+              {(() => {
+                const missing = [];
+                if (!selectedStudent.birthDate) missing.push("Birth Date");
+                if (!selectedStudent.lrn || selectedStudent.lrn.trim() === "") missing.push("LRN");
+                if (!selectedStudent.address) missing.push("Home Address");
+                if (!selectedStudent.guardianName) missing.push("Guardian Name");
+                
+                if (missing.length === 0) return null;
+                
+                return (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 animate-pulse-subtle">
+                    <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+                    <div>
+                      <h4 className="text-sm font-bold text-red-900">Information Needed</h4>
+                      <p className="text-xs text-red-700 mt-0.5">
+                        The following fields are empty and should be synced from EnrollPro: 
+                        <span className="font-bold ml-1">{missing.join(", ")}</span>
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Form Compliance Checklist */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest flex items-center gap-2 ml-1">
+                  <FileCheck className="w-3.5 h-3.4" style={{ color: colors.primary }} />
+                  School Forms Readiness
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  <FormStatusCard 
+                    label="SF1" 
+                    title="School Register" 
+                    status={selectedStudent.status === 'ENROLLED' ? 'completed' : 'pending'} 
+                    description="Master list of enrolled students"
+                  />
+                  <FormStatusCard 
+                    label="SF2" 
+                    title="Daily Attendance Report" 
+                    status={sf9Data && Object.keys(sf9Data.attendance || {}).length > 0 ? 'completed' : 'pending'} 
+                    description="Daily attendance tracking"
+                  />
+                  <FormStatusCard 
+                    label="SF3" 
+                    title="Books Issued and Returned" 
+                    status="dev" 
+                    description="Textbook and material tracking"
+                  />
+                  <FormStatusCard 
+                    label="SF4" 
+                    title="Monthly Learner's Movement and Attendance" 
+                    status="dev" 
+                    description="Enrollment and dropout summary"
+                  />
+                  <FormStatusCard 
+                    label="SF5" 
+                    title="Report on Promotion" 
+                    status="dev" 
+                    description="Final academic performance"
+                  />
+                  <FormStatusCard 
+                    label="SF6" 
+                    title="Summarized Report on Promotion" 
+                    status="dev" 
+                    description="Consolidated promotion summary"
+                  />
+                  <FormStatusCard 
+                    label="SF7" 
+                    title="School Personnel Assignment List" 
+                    status="dev" 
+                    description="Staff and teaching assignments"
+                  />
+                  <FormStatusCard 
+                    label="SF8" 
+                    title="Learner's Basic Health Profile" 
+                    status="dev" 
+                    description="BMI and nutritional status"
+                  />
+                  <FormStatusCard 
+                    label="SF9" 
+                    title="Learner's Progress Report Card" 
+                    status={sf9Data && sf9Data.subjectGrades?.length > 0 ? 'completed' : 'pending'} 
+                    description="Quarterly issued report card"
+                  />
+                  <FormStatusCard 
+                    label="SF10" 
+                    title="Learner's Permanent Academic Record" 
+                    status={sf10Data && sf10Data.schoolRecords?.length > 0 ? 'completed' : 'pending'} 
+                    description="Official cumulative record"
+                  />
                 </div>
               </div>
 

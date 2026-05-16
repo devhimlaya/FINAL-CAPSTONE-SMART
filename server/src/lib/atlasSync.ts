@@ -14,7 +14,7 @@
 import http from 'http';
 import https from 'https';
 import { prisma } from './prisma';
-import { getEnrollProTeachers, getIntegrationV1Sections, resolveEnrollProSchoolYear } from './enrollproClient';
+import { getEnrollProTeachers, getAllIntegrationV1Sections, resolveEnrollProSchoolYear } from './enrollproClient';
 import { syncAdvisoryWorkloadEntry } from './workload';
 import { setCachedAtlasFaculty } from './syncCache';
 
@@ -176,9 +176,9 @@ export async function runAtlasSync(): Promise<typeof lastSyncResult> {
     // 3.1 Build EnrollPro sectionId → section details map for ATLAS assignments
     let epSectionById = new Map<number, any>();
     try {
-      let epSections = await getIntegrationV1Sections(enrollProSchoolYearId);
+      let epSections = await getAllIntegrationV1Sections(enrollProSchoolYearId);
       if (epSections.length === 0) {
-        epSections = await getIntegrationV1Sections();
+        epSections = await getAllIntegrationV1Sections();
         console.warn(
           `[AtlasSync] No EnrollPro sections for schoolYearId=${enrollProSchoolYearId}; using unscoped sections fallback (${epSections.length})`,
         );
@@ -189,6 +189,24 @@ export async function runAtlasSync(): Promise<typeof lastSyncResult> {
     }
 
     // 4. Build subject code → SMART subject map
+    // 4.1 First, fetch complete subject definitions from ATLAS to get their full names
+    try {
+      const atlasSubjectsData = await get(`${ATLAS_BASE}/subjects?schoolId=${ATLAS_SCHOOL_ID}`, authHeader);
+      const atlasSubjects: any[] = atlasSubjectsData.subjects ?? [];
+      for (const atlasSubj of atlasSubjects) {
+        if (!atlasSubj.code || !atlasSubj.name) continue;
+        const code = normalizeAtlasSubjectCode(atlasSubj.code);
+        await prisma.subject.upsert({
+          where: { code },
+          update: { name: atlasSubj.name },
+          create: { code, name: atlasSubj.name, type: 'CORE' },
+        });
+      }
+      console.log(`[AtlasSync] Synced ${atlasSubjects.length} subjects from ATLAS`);
+    } catch (err: any) {
+      console.warn(`[AtlasSync] Failed to fetch subjects from ATLAS: ${err.message}`);
+    }
+
     const allSubjects = await prisma.subject.findMany();
     const subjectByCode = new Map(allSubjects.map(s => [s.code, s]));
     const homeroomLabelUpdated = new Set<string>();
@@ -442,6 +460,37 @@ export function getSyncStatus() {
     lastSyncAt: lastSyncAt?.toISOString() ?? null,
     result: lastSyncResult,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Read-only ATLAS data helpers (for registrar proxy endpoints)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch teaching load summary from ATLAS.
+ * GET /faculty-assignments/summary?schoolId=<id>&schoolYearId=<id>
+ * Requires ATLAS_SYSTEM_TOKEN.
+ */
+export async function getAtlasTeachingLoadSummary(
+  atlasSchoolYearId?: number,
+): Promise<any> {
+  const atlasToken = process.env.ATLAS_SYSTEM_TOKEN;
+  if (!atlasToken) throw new Error('ATLAS_SYSTEM_TOKEN not configured');
+  const syId = atlasSchoolYearId ?? DEFAULT_ATLAS_SCHOOL_YEAR_ID;
+  const url = `${ATLAS_BASE}/faculty-assignments/summary?schoolId=${ATLAS_SCHOOL_ID}&schoolYearId=${syId}`;
+  return get(url, { Authorization: `Bearer ${atlasToken}` });
+}
+
+/**
+ * Fetch subject coverage (assigned vs unassigned) from ATLAS.
+ * GET /subjects/stats/:schoolId
+ * Requires ATLAS_SYSTEM_TOKEN.
+ */
+export async function getAtlasSubjectStats(): Promise<any> {
+  const atlasToken = process.env.ATLAS_SYSTEM_TOKEN;
+  if (!atlasToken) throw new Error('ATLAS_SYSTEM_TOKEN not configured');
+  const url = `${ATLAS_BASE}/subjects/stats/${ATLAS_SCHOOL_ID}`;
+  return get(url, { Authorization: `Bearer ${atlasToken}` });
 }
 
 // NOTE: Scheduling is now handled by syncCoordinator.ts.

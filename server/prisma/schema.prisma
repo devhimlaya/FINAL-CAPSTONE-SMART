@@ -235,6 +235,25 @@ model AuditLog {
   @@index([targetType])
 }
 
+model SyncHistory {
+  id          String   @id @default(cuid())
+  source      String
+  status      String
+  durationMs  Int
+  startedAt   DateTime
+  completedAt DateTime
+  enrollpro   Json?
+  atlas       Json?
+  branding    Boolean  @default(false)
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([source])
+}
+
 model SystemSettings {
   id                 String    @id @default("main")
   schoolName         String    @default("Sample High School")

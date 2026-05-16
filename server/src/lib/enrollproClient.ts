@@ -364,10 +364,18 @@ export async function getIntegrationV1ActiveSchoolYear(): Promise<{ id: number; 
 export async function getIntegrationV1LearnersPage(
   schoolYearId: number,
   page = 1,
-  limit = 200
+  limit = 200,
+  updatedSince?: string,
 ): Promise<{ data: any[]; meta: { total: number; page: number; limit: number; totalPages: number } }> {
+  const query = new URLSearchParams({
+    schoolYearId: String(schoolYearId),
+    page: String(page),
+    limit: String(limit),
+  });
+  if (updatedSince) query.set('updatedSince', updatedSince);
+
   const result = await fetchJSON(
-    `${ENROLLPRO_BASE}/integration/v1/learners?schoolYearId=${schoolYearId}&page=${page}&limit=${limit}`
+    `${ENROLLPRO_BASE}/integration/v1/learners?${query.toString()}`
   );
   return { data: result?.data ?? [], meta: result?.meta ?? { total: 0, page, limit, totalPages: 0 } };
 }
@@ -376,13 +384,13 @@ export async function getIntegrationV1LearnersPage(
  * Fetches ALL enrolled learners across all pages from Integration v1.
  * No auth required. Automatically paginates until all records are retrieved.
  */
-export async function getAllIntegrationV1Learners(schoolYearId: number): Promise<any[]> {
+export async function getAllIntegrationV1Learners(schoolYearId: number, updatedSince?: string): Promise<any[]> {
   const all: any[] = [];
   let page = 1;
   const limit = 200;
 
   while (true) {
-    const { data, meta } = await getIntegrationV1LearnersPage(schoolYearId, page, limit);
+    const { data, meta } = await getIntegrationV1LearnersPage(schoolYearId, page, limit, updatedSince);
     all.push(...data);
     if (page >= meta.totalPages || data.length === 0) break;
     page++;
@@ -392,17 +400,41 @@ export async function getAllIntegrationV1Learners(schoolYearId: number): Promise
 }
 
 /**
- * Returns all sections with grade level and enrollment count.
+ * Returns a single page of sections from EnrollPro's integration feed.
  * No auth required.
- * GET /api/integration/v1/sections?schoolYearId=:id
- * Each section: { id, name, programType, maxCapacity, enrolledCount, gradeLevel: { id, name, displayOrder }, advisingTeacher: { id, firstName, lastName }, schoolYear }
+ * GET /api/integration/v1/sections?schoolYearId=:id&page=:n&limit=:n
  */
-export async function getIntegrationV1Sections(schoolYearId?: number): Promise<any[]> {
-  const url = schoolYearId
-    ? `${ENROLLPRO_BASE}/integration/v1/sections?schoolYearId=${schoolYearId}`
-    : `${ENROLLPRO_BASE}/integration/v1/sections`;
-  const result = await fetchJSON(url);
+export async function getIntegrationV1Sections(
+  schoolYearId?: number,
+  page = 1,
+  limit = 200,
+): Promise<any[]> {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (schoolYearId) query.set('schoolYearId', String(schoolYearId));
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/integration/v1/sections?${query.toString()}`);
   return result?.data ?? [];
+}
+
+/**
+ * Fetches ALL sections across all pages from EnrollPro's integration feed.
+ * No auth required. Automatically paginates.
+ * Use this instead of getIntegrationV1Sections() when you need the full list
+ * (e.g., if there are 66 sections but the server default limit is 50).
+ */
+export async function getAllIntegrationV1Sections(schoolYearId?: number): Promise<any[]> {
+  const all: any[] = [];
+  let page = 1;
+  const limit = 200;
+
+  while (true) {
+    const data = await getIntegrationV1Sections(schoolYearId, page, limit);
+    all.push(...data);
+    // If fewer results than the limit, we've hit the last page
+    if (data.length < limit) break;
+    page++;
+  }
+
+  return all;
 }
 
 /**
@@ -442,8 +474,11 @@ export async function getIntegrationV1SectionLearners(
   sectionId: number,
   page = 1,
   limit = 50,
+  updatedSince?: string,
 ): Promise<{ section: any; learners: any[]; total: number }> {
-  const url = `${ENROLLPRO_BASE}/integration/v1/sections/${sectionId}/learners?page=${page}&limit=${limit}`;
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (updatedSince) query.set('updatedSince', updatedSince);
+  const url = `${ENROLLPRO_BASE}/integration/v1/sections/${sectionId}/learners?${query.toString()}`;
   const result = await fetchJSON(url);
   return {
     section: result?.data?.section ?? null,
@@ -456,12 +491,12 @@ export async function getIntegrationV1SectionLearners(
  * Returns ALL learners in a section across all pages.
  * No auth required.
  */
-export async function getAllIntegrationV1SectionLearners(sectionId: number): Promise<any[]> {
+export async function getAllIntegrationV1SectionLearners(sectionId: number, updatedSince?: string): Promise<any[]> {
   const all: any[] = [];
   let page = 1;
   const limit = 50;
   while (true) {
-    const { learners, total } = await getIntegrationV1SectionLearners(sectionId, page, limit);
+    const { learners, total } = await getIntegrationV1SectionLearners(sectionId, page, limit, updatedSince);
     all.push(...learners);
     if (all.length >= total || learners.length === 0) break;
     page++;
@@ -672,4 +707,173 @@ export interface IntegrationV1Faculty {
   advisorySectionGradeLevelName: string | null;
   schoolYearId: number;
   schoolYearLabel: string;
+}
+
+// ---------------------------------------------------------------------------
+// Admissions — Applications (Phase 9, requires auth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns enrollment applications from EnrollPro.
+ * GET /api/applications
+ */
+export async function getEnrollProApplications(params?: {
+  status?: string;
+  schoolYearId?: number;
+  gradeLevel?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<any> {
+  const token = await getAdminToken();
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.schoolYearId) query.set('schoolYearId', String(params.schoolYearId));
+  if (params?.gradeLevel) query.set('gradeLevel', params.gradeLevel);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.search) query.set('search', params.search);
+  const qs = query.toString();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/applications${qs ? '?' + qs : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// BOSY — Beginning of School Year (requires auth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns learners in the PENDING_CONFIRMATION BOSY queue.
+ * GET /api/bosy/queue
+ */
+export async function getEnrollProBosyQueue(params?: {
+  schoolYearId?: number;
+  gradeLevel?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<any> {
+  const token = await getAdminToken();
+  const query = new URLSearchParams();
+  if (params?.schoolYearId) query.set('schoolYearId', String(params.schoolYearId));
+  if (params?.gradeLevel) query.set('gradeLevel', params.gradeLevel);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.search) query.set('search', params.search);
+  const qs = query.toString();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/bosy/queue${qs ? '?' + qs : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+/**
+ * Returns prior-year PROMOTED learners not yet in current SY pipeline.
+ * GET /api/bosy/expected-queue
+ */
+export async function getEnrollProBosyExpectedQueue(params?: {
+  priorSchoolYearId?: number;
+  currentSchoolYearId?: number;
+  gradeLevel?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<any> {
+  const token = await getAdminToken();
+  const query = new URLSearchParams();
+  if (params?.priorSchoolYearId) query.set('priorSchoolYearId', String(params.priorSchoolYearId));
+  if (params?.currentSchoolYearId) query.set('currentSchoolYearId', String(params.currentSchoolYearId));
+  if (params?.gradeLevel) query.set('gradeLevel', params.gradeLevel);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.search) query.set('search', params.search);
+  const qs = query.toString();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/bosy/expected-queue${qs ? '?' + qs : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Remedial Processing (requires auth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns learners with pending remedial status.
+ * GET /api/remedial/pending
+ */
+export async function getEnrollProRemedialPending(params?: {
+  schoolYearId?: number;
+  gradeLevel?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<any> {
+  const token = await getAdminToken();
+  const query = new URLSearchParams();
+  if (params?.schoolYearId) query.set('schoolYearId', String(params.schoolYearId));
+  if (params?.gradeLevel) query.set('gradeLevel', params.gradeLevel);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.search) query.set('search', params.search);
+  const qs = query.toString();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/remedial/pending${qs ? '?' + qs : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// EOSY — End of School Year (requires auth)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns sections available for EOSY processing.
+ * GET /api/eosy/sections
+ */
+export async function getEnrollProEosySections(schoolYearId?: number): Promise<any> {
+  const token = await getAdminToken();
+  const qs = schoolYearId ? `?schoolYearId=${schoolYearId}` : '';
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/eosy/sections${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+/**
+ * Returns final grades and promotion status for a section.
+ * GET /api/eosy/sections/:id/records
+ */
+export async function getEnrollProEosySectionRecords(sectionId: number): Promise<any> {
+  const token = await getAdminToken();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/eosy/sections/${sectionId}/records`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+/**
+ * Returns SF5 data for a section (section-scoped promotion report).
+ * GET /api/eosy/sections/:id/exports/sf5
+ */
+export async function getEnrollProEosySF5(sectionId: number): Promise<any> {
+  const token = await getAdminToken();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/eosy/sections/${sectionId}/exports/sf5`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
+}
+
+/**
+ * Returns SF6 data (school-wide enrollment summary by grade level).
+ * GET /api/eosy/exports/sf6
+ */
+export async function getEnrollProEosySF6(schoolYearId: number): Promise<any> {
+  const token = await getAdminToken();
+  const result = await fetchJSON(`${ENROLLPRO_BASE}/eosy/exports/sf6?schoolYearId=${schoolYearId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return result;
 }

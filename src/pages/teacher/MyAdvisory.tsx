@@ -11,7 +11,7 @@ import {
   SplitSquareHorizontal,
   RefreshCw,
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { advisoryApi, type AdvisoryData } from "@/lib/api";
 import { useTheme } from "@/contexts/ThemeContext";
+import { cn } from "@/lib/utils";
 
 const gradeLevelLabels: Record<string, string> = {
   GRADE_7: "Grade 7",
@@ -200,16 +201,33 @@ export default function MyAdvisory() {
     <div className="space-y-8 animate-fade-in max-w-7xl mx-auto pb-12">
       {/* Header Section - Refined Glass Style */}
       <div className="relative overflow-hidden rounded-[2.5rem] bg-white border border-slate-100 p-8 shadow-xl shadow-slate-200/50">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50/50 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
+        <div 
+          className="absolute top-0 right-0 w-64 h-64 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" 
+          style={{ backgroundColor: `${colors.primary}15` }}
+        />
         
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
           <div className="flex items-center gap-6">
-            <div className="w-20 h-20 rounded-[2rem] bg-indigo-600 text-white flex items-center justify-center shadow-xl shadow-indigo-200">
+            <div 
+              className="w-20 h-20 rounded-[2rem] text-white flex items-center justify-center shadow-xl transition-all duration-500"
+              style={{ 
+                backgroundColor: colors.primary,
+                boxShadow: `0 20px 25px -5px ${colors.primary}40, 0 10px 10px -5px ${colors.primary}20`
+              }}
+            >
               <GraduationCap className="w-10 h-10" />
             </div>
             <div>
               <div className="flex items-center gap-3 mb-1.5">
-                <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 border-indigo-100 text-[10px] font-black uppercase tracking-widest px-3">
+                <Badge 
+                  variant="secondary" 
+                  className="text-[10px] font-black uppercase tracking-widest px-3 border"
+                  style={{ 
+                    backgroundColor: `${colors.primary}10`, 
+                    color: colors.primary,
+                    borderColor: `${colors.primary}20`
+                  }}
+                >
                   Class Adviser
                 </Badge>
                 <div className="h-4 w-px bg-slate-200" />
@@ -228,7 +246,10 @@ export default function MyAdvisory() {
           <div className="flex flex-col items-end gap-3">
             <div className="flex items-center gap-4 bg-slate-50/80 backdrop-blur-sm px-6 py-4 rounded-[2rem] border border-slate-100 shadow-sm">
                <Avatar className="w-12 h-12 border-2 border-white shadow-md">
-                 <AvatarFallback className="bg-indigo-600 text-white font-black text-lg">
+                 <AvatarFallback 
+                    className="text-white font-black text-lg"
+                    style={{ backgroundColor: colors.primary }}
+                 >
                    {data.teacher.name.charAt(0)}
                  </AvatarFallback>
                </Avatar>
@@ -242,10 +263,17 @@ export default function MyAdvisory() {
               size="sm"
               onClick={handleSync}
               disabled={syncing}
-              className="h-10 px-5 rounded-2xl border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-all"
+              className="h-10 px-5 rounded-2xl border-slate-200 text-slate-600 font-black text-[10px] uppercase tracking-widest transition-all group/sync"
             >
-              <RefreshCw className={`w-3.5 h-3.5 mr-2 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'SYNCING...' : 'SYNC FROM ENROLLPRO'}
+              <RefreshCw className={`w-3.5 h-3.5 mr-2 ${syncing ? 'animate-spin' : ''} group-hover/sync:text-primary`} />
+              <span className="group-hover/sync:text-slate-900">{syncing ? 'SYNCING...' : 'SYNC FROM ENROLLPRO'}</span>
+              <style dangerouslySetInnerHTML={{ __html: `
+                .group\\/sync:hover {
+                  background-color: ${colors.primary}10 !important;
+                  border-color: ${colors.primary}30 !important;
+                  color: ${colors.primary} !important;
+                }
+              `}} />
             </Button>
             {syncMessage && (
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{syncMessage}</p>
@@ -257,13 +285,23 @@ export default function MyAdvisory() {
       {/* Quick Insights Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-6">
         {[
-          { label: "TOTAL CLASS", value: data.stats?.totalStudents || 0, icon: Users, color: "indigo" },
+          { label: "TOTAL CLASS", value: data.stats?.totalStudents || 0, icon: Users, color: "theme" },
           { label: "MALE LEARNERS", value: data.stats?.maleCount || 0, icon: UserCircle, color: "blue" },
           { label: "FEMALE LEARNERS", value: data.stats?.femaleCount || 0, icon: UserCircle, color: "pink" },
         ].map((stat) => (
           <Card key={stat.label} className="border-0 shadow-lg shadow-slate-200/50 overflow-hidden rounded-[2rem] bg-white group hover:-translate-y-1 transition-all duration-300">
             <CardContent className="p-6 flex items-center gap-5">
-              <div className={`p-3.5 rounded-2xl bg-${stat.color}-50 text-${stat.color}-600 group-hover:scale-110 transition-transform`}>
+              <div 
+                className={cn(
+                  "p-3.5 rounded-2xl group-hover:scale-110 transition-transform",
+                  stat.color === "blue" ? "bg-blue-50 text-blue-600" : 
+                  stat.color === "pink" ? "bg-pink-50 text-pink-600" : ""
+                )}
+                style={stat.color === "theme" ? { 
+                  backgroundColor: `${colors.primary}15`, 
+                  color: colors.primary 
+                } : {}}
+              >
                 <stat.icon className="w-6 h-6" />
               </div>
               <div>
@@ -285,9 +323,10 @@ export default function MyAdvisory() {
               variant="ghost"
               size="sm"
               onClick={() => setSeparateByGender(!separateByGender)}
-              className={`h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all border ${
-                separateByGender ? 'bg-slate-900 text-white border-slate-900' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-50 border-slate-100'
-              }`}
+              className={cn(
+                "h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all border",
+                separateByGender ? "bg-slate-900 text-white border-slate-900" : "text-slate-400 hover:text-slate-900 hover:bg-slate-50 border-slate-100"
+              )}
             >
               <SplitSquareHorizontal className="w-4 h-4 mr-2" />
               {separateByGender ? "GENDER SEPARATED" : "BY GENDER"}
@@ -295,15 +334,29 @@ export default function MyAdvisory() {
           </div>
           
           <div className="relative w-full sm:w-80 group">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-slate-100 text-slate-400 group-focus-within:bg-indigo-600 group-focus-within:text-white transition-all">
+            <div 
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-slate-100 text-slate-400 group-focus-within:text-white transition-all"
+              style={{
+                // We'll handle background color via style for focus-within if possible, or just use a custom class
+              } as any}
+            >
               <Search className="w-3.5 h-3.5" />
+              <style dangerouslySetInnerHTML={{ __html: `
+                .group:focus-within .absolute.left-4 {
+                  background-color: ${colors.primary} !important;
+                }
+              `}} />
             </div>
             <Input
               type="text"
               placeholder="Search by name or LRN..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-14 h-12 text-xs font-bold bg-slate-50 border-0 rounded-2xl focus:ring-4 focus:ring-indigo-50 transition-all placeholder:text-slate-400"
+              className="pl-14 h-12 text-xs font-bold bg-slate-50 border-0 rounded-2xl transition-all placeholder:text-slate-400"
+              style={{
+                // focus ring color
+                outlineColor: `${colors.primary}20`
+              } as any}
             />
           </div>
         </CardHeader>
@@ -329,7 +382,10 @@ export default function MyAdvisory() {
                       <TableCell>
                         <div className="flex items-center gap-4">
                           <Avatar className="w-9 h-9 border-2 border-white shadow-sm ring-1 ring-slate-100">
-                            <AvatarFallback className={`text-white font-black text-xs ${student.gender?.toLowerCase() === 'male' ? 'bg-blue-500' : 'bg-pink-500'}`}>
+                            <AvatarFallback className={cn(
+                              "text-white font-black text-xs",
+                              student.gender?.toLowerCase() === "male" ? "bg-blue-500" : "bg-pink-500"
+                            )}>
                               {student.lastName.charAt(0)}
                             </AvatarFallback>
                           </Avatar>
@@ -341,7 +397,13 @@ export default function MyAdvisory() {
                       </TableCell>
                       {!separateByGender && (
                         <TableCell className="text-center">
-                          <Badge variant="secondary" className={`text-[9px] font-black uppercase px-3 h-6 rounded-lg border-0 ${student.gender?.toLowerCase() === 'male' ? 'bg-blue-50 text-blue-600' : 'bg-pink-50 text-pink-600'}`}>
+                          <Badge 
+                            variant="secondary" 
+                            className={cn(
+                              "text-[9px] font-black uppercase px-3 h-6 rounded-lg border-0",
+                              student.gender?.toLowerCase() === "male" ? "bg-blue-50 text-blue-600" : "bg-pink-50 text-pink-600"
+                            )}
+                          >
                             {student.gender || 'N/A'}
                           </Badge>
                         </TableCell>
@@ -351,9 +413,19 @@ export default function MyAdvisory() {
                       </TableCell>
                       <TableCell className="text-right pr-8">
                         <Link to={`/teacher/advisory/student/${student.id}`}>
-                          <Button size="sm" variant="ghost" className="h-10 px-4 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 font-black text-[10px] tracking-widest uppercase transition-all">
-                            PROFILE
-                            <ChevronRight className="w-4 h-4 ml-2" />
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-10 px-4 rounded-xl text-slate-400 font-black text-[10px] tracking-widest uppercase transition-all group/profile"
+                          >
+                            <span className="group-hover/profile:text-primary">PROFILE</span>
+                            <ChevronRight className="w-4 h-4 ml-2 group-hover/profile:translate-x-1 transition-transform" />
+                            <style dangerouslySetInnerHTML={{ __html: `
+                              .group\\/profile:hover {
+                                background-color: ${colors.primary}10 !important;
+                                color: ${colors.primary} !important;
+                              }
+                            `}} />
                           </Button>
                         </Link>
                       </TableCell>
